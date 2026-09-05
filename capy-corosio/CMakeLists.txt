@@ -35,6 +35,7 @@ FetchContent_MakeAvailable(capy corosio)
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpclient)
+add_subdirectory(udpserver)
 
 if(COROSIO_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)

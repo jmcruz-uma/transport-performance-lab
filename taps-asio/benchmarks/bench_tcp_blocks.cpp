@@ -1,8 +1,13 @@
 /*
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
- * TAPS raw-byte file download benchmark
- * Minimal benchmark version for performance and energy measurements.
+ * TAPS, BLOCKS model (scenario "blocks", E3).
+ * One logical Message (PassthroughFramer, RFC 9623 5.2/6.1 -- the whole
+ * connection is one Message), consumed segment by segment via blocks()
+ * WITHOUT ever materialising it contiguously: gather=false means as_bytes()
+ * is never called, so no gather copy happens anywhere on this path (each
+ * block corresponds to what would be one Framer::parse() call in a real
+ * protocol).
  */
 
 #include "taps/taps_api.h"
@@ -12,7 +17,6 @@
 #include <asio.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
-#include <asio/detached.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 
@@ -53,7 +57,7 @@ static asio::awaitable<std::unique_ptr<taps::Connection>> connect_to_server(
     co_return std::move(*connection_result);
 }
 
-static asio::awaitable<std::uint64_t> receive_data(
+static asio::awaitable<std::uint64_t> receive_blocks(
     asio::io_context& io_context,
     const char* ip,
     int port
@@ -65,6 +69,10 @@ static asio::awaitable<std::uint64_t> receive_data(
         co_return 0;
     }
 
+    // gather=false: the whole-connection Message is delivered as a chain of
+    // pooled blocks, never gathered into one contiguous buffer.
+    connection->set_framer(std::make_unique<taps::PassthroughFramer>(/*gather=*/false));
+
     std::uint64_t total_bytes = 0;
 
     while (true) {
@@ -75,17 +83,19 @@ static asio::awaitable<std::uint64_t> receive_data(
         }
 
         auto message = std::move(*receive_result);
-        const auto data = message.as_bytes();
+        const auto segments = message.blocks();
 
-        if (data.empty()) {
+        if (segments.empty()) {
             break;
         }
 
-        total_bytes += static_cast<std::uint64_t>(data.size());
+        for (const auto& segment : segments) {
+            total_bytes += static_cast<std::uint64_t>(segment.size());
 
-        benchmark::DoNotOptimize(data.data());
-        benchmark::DoNotOptimize(total_bytes);
-        benchmark::ClobberMemory();
+            benchmark::DoNotOptimize(segment.data());
+            benchmark::DoNotOptimize(total_bytes);
+            benchmark::ClobberMemory();
+        }
     }
 
     co_return total_bytes;
@@ -100,7 +110,7 @@ static bool run_benchmark_download(
 
     auto result = asio::co_spawn(
         io_context,
-        receive_data(io_context, ip, port),
+        receive_blocks(io_context, ip, port),
         asio::use_future
     );
 
@@ -110,7 +120,7 @@ static bool run_benchmark_download(
     return downloaded_bytes > 0;
 }
 
-static void BM_TCP_FileDownload(benchmark::State& state) {
+static void BM_TCP_Blocks(benchmark::State& state) {
     constexpr const char* ip = "127.0.0.1";
     const int port = g_port;
 
@@ -141,7 +151,7 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
     state.counters["downloaded_bytes"] = static_cast<double>(last_downloaded_bytes);
 }
 
-BENCHMARK(BM_TCP_FileDownload)
+BENCHMARK(BM_TCP_Blocks)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1)
     ->UseRealTime();

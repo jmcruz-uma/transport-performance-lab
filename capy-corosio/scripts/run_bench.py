@@ -17,6 +17,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from bench_scenarios import SCENARIOS, DRY_RUN, active_scenarios, is_done, mark_done
+
 
 # =========================
 # PATHS
@@ -85,6 +88,54 @@ COMPARISON_PDF_NO_RAW = REPORTS_DIR / "macro_bench_comparison_report_no_raw.pdf"
 # Backward-compatible aliases
 PDF_RESULTS = MAIN_PDF_WITH_RAW
 COMPARISON_PDF_RESULTS = COMPARISON_PDF_WITH_RAW
+
+# =========================
+# SCENARIOS (E0 streaming / E1 whole_object / E3 blocks / E4 udp_k64,k1400)
+# =========================
+CURRENT_SCENARIO = None
+SERVER_DIR = "tcpserver"
+BENCH_NAME = "bench_tcp"
+SCENARIO_ENV = {}
+
+
+def _child_env():
+    return {**os.environ, **{k: str(v) for k, v in SCENARIO_ENV.items()}}
+
+
+def _activate_scenario(name):
+    """Rebind the scenario-dependent module globals before a scenario's campaign."""
+    global CURRENT_SCENARIO, SERVER_DIR, BENCH_NAME, SCENARIO_ENV
+    global MACRO_BENCH_CASES, SERVER_THREADS
+    global RESULTS_DIR, RAW_DIR, PLOTS_DIR, REPORTS_DIR, LOGS_DIR
+    global FINAL_RESULTS, SUMMARY_RESULTS, CSV_RESULTS
+    global MAIN_PDF_WITH_RAW, MAIN_PDF_NO_RAW
+    global COMPARISON_PDF_WITH_RAW, COMPARISON_PDF_NO_RAW
+    global PDF_RESULTS, COMPARISON_PDF_RESULTS
+
+    spec = SCENARIOS[name]
+    CURRENT_SCENARIO = name
+    SERVER_DIR = spec["server"]
+    BENCH_NAME = spec["bench"]
+    SCENARIO_ENV = dict(spec.get("env", {}))
+    MACRO_BENCH_CASES = list(spec["cases"])
+    SERVER_THREADS = list(spec["threads"])
+
+    RESULTS_DIR = Path("./results") / name
+    RAW_DIR = RESULTS_DIR / "raw"
+    PLOTS_DIR = RESULTS_DIR / "plots"
+    REPORTS_DIR = RESULTS_DIR / "reports"
+    LOGS_DIR = RESULTS_DIR / "logs"
+
+    FINAL_RESULTS = RAW_DIR / "macro_bench_results.json"
+    SUMMARY_RESULTS = RAW_DIR / "macro_bench_summary.json"
+    CSV_RESULTS = RAW_DIR / "macro_bench_results.csv"
+
+    MAIN_PDF_WITH_RAW = REPORTS_DIR / "macro_bench_report_with_raw.pdf"
+    MAIN_PDF_NO_RAW = REPORTS_DIR / "macro_bench_report_no_raw.pdf"
+    COMPARISON_PDF_WITH_RAW = REPORTS_DIR / "macro_bench_comparison_report_with_raw.pdf"
+    COMPARISON_PDF_NO_RAW = REPORTS_DIR / "macro_bench_comparison_report_no_raw.pdf"
+    PDF_RESULTS = MAIN_PDF_WITH_RAW
+    COMPARISON_PDF_RESULTS = COMPARISON_PDF_WITH_RAW
 
 # =========================
 # CASE-LEVEL SETTLE / CACHE CONTROL
@@ -189,17 +240,19 @@ def energy_delta_j(e1, e2):
 # PATH HELPERS
 # =========================
 def get_file_size():
+    if DRY_RUN and not os.path.exists(FILE_TO_SERVE):
+        return 100 * 1024 * 1024
     return os.path.getsize(FILE_TO_SERVE)
 
 
 
 def get_server_bin(compiler):
-    return os.path.join(BUILD_DIRS[compiler], "tcpserver", "tcpserver")
+    return os.path.join(BUILD_DIRS[compiler], SERVER_DIR, SERVER_DIR)
 
 
 
 def get_bench_bin(compiler):
-    return os.path.join(BUILD_DIRS[compiler], "benchmarks", "bench_tcp")
+    return os.path.join(BUILD_DIRS[compiler], "benchmarks", BENCH_NAME)
 
 
 
@@ -357,6 +410,7 @@ def start_server(compiler, server_threads):
         [server_bin, FILE_TO_SERVE, str(port), str(server_threads)],
         stdout=stdout_file,
         stderr=stderr_file,
+        env=_child_env(),
         text=True,
         preexec_fn=os.setsid,
     )
@@ -521,6 +575,7 @@ def start_bench_instance(compiler, server_threads, case_clients, repetition, ind
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=err_file,
+        env=_child_env(),
         preexec_fn=os.setsid,
     )
 
@@ -1453,7 +1508,7 @@ def print_console_summary(summary):
 # =========================
 # MAIN
 # =========================
-def main():
+def _run_one_scenario():
     ensure_results_dir()
 
     all_results = []
@@ -1503,14 +1558,14 @@ def main():
 
     write_csv(all_results)
 
-    if GENERATE_PLOTS:
+    if GENERATE_PLOTS and not DRY_RUN:
         generate_plots(all_results, summary)
 
-    if GENERATE_PDF:
+    if GENERATE_PDF and not DRY_RUN:
         generate_main_pdf_report(final, summary, all_results, MAIN_PDF_WITH_RAW, include_raw_results=True)
         generate_main_pdf_report(final, summary, all_results, MAIN_PDF_NO_RAW, include_raw_results=False)
 
-    if GENERATE_COMPARISON_PDF:
+    if GENERATE_COMPARISON_PDF and not DRY_RUN:
         generate_comparison_pdf_report(final, summary, all_results, COMPARISON_PDF_WITH_RAW, include_raw_results=True)
         generate_comparison_pdf_report(final, summary, all_results, COMPARISON_PDF_NO_RAW, include_raw_results=False)
 
@@ -1527,6 +1582,17 @@ def main():
     log(f"Comparison PDF report without raw results: {COMPARISON_PDF_NO_RAW}")
     log(f"Plots directory: {PLOTS_DIR}")
     log(f"Logs directory: {LOGS_DIR}")
+
+
+def main():
+    for name in active_scenarios():
+        _activate_scenario(name)
+        if is_done(str(RESULTS_DIR)):
+            log(f"[{name}] already completed, skipping (resume)")
+            continue
+        log(f"=== Scenario: {name} (server={SERVER_DIR}, bench={BENCH_NAME}) ===")
+        _run_one_scenario()
+        mark_done(str(RESULTS_DIR))
 
 
 if __name__ == "__main__":

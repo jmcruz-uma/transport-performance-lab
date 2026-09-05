@@ -22,25 +22,28 @@ message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
 
 option(ASYNC_TCP_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
-set(ASYNC_BERKELEY_DIR
-    "/home/jagarcia/Escritorio/TFM/async-berkeley/async-berkeley"
-    CACHE PATH "Path to async-berkeley root directory"
-)
-
-if(NOT EXISTS "${ASYNC_BERKELEY_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR
-        "async-berkeley not found at: ${ASYNC_BERKELEY_DIR}\n"
-        "Set -DASYNC_BERKELEY_DIR=/path/to/async-berkeley"
-    )
-endif()
+# Fetched from GitHub by default (no manual setup needed, pinned to the commit
+# this branch was validated against); set ASYNC_BERKELEY_DIR yourself to reuse
+# an existing checkout instead.
+set(ASYNC_BERKELEY_DIR "" CACHE PATH
+    "Path to an existing async-berkeley checkout (leave empty to fetch automatically)")
 
 set(CMAKE_CXX_FLAGS_DEBUG   "-g -O0 -w")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -w")
 
-add_subdirectory("${ASYNC_BERKELEY_DIR}" "${CMAKE_BINARY_DIR}/async-berkeley-build")
+if(ASYNC_BERKELEY_DIR STREQUAL "" OR NOT EXISTS "${ASYNC_BERKELEY_DIR}/CMakeLists.txt")
+    include(FetchContent)
+    FetchContent_Declare(async_berkeley
+        GIT_REPOSITORY https://github.com/kcexn/async-berkeley.git
+        GIT_TAG dfc58059ec754a5de774173e2a4837778f6dc996)
+    FetchContent_MakeAvailable(async_berkeley)
+else()
+    add_subdirectory("${ASYNC_BERKELEY_DIR}" "${CMAKE_BINARY_DIR}/async-berkeley-build")
+endif()
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpclient)
+add_subdirectory(udpserver)
 
 if(ASYNC_TCP_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)

@@ -71,7 +71,7 @@ static asio::awaitable<bool> receive_file(
         }
 
         auto message = std::move(*receive_result);
-        auto data = message.data();
+        auto data = message.as_bytes();
 
         if (data.empty()) {
             break;

@@ -1,8 +1,11 @@
 /*
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
- * Corosio raw-byte file download benchmark
- * Minimal benchmark version for performance and energy measurements.
+ * Corosio, WHOLE-OBJECT model (scenario "whole_object", E1).
+ * The client receives the transfer as ONE object: it accumulates every byte into
+ * a single growing buffer (geometric growth), so at end-of-stream the buffer IS
+ * the object. No length prefix on the wire (raw-until-close), same as streaming.
+ * This is the cost of "hand me the whole thing" for a minimal buffer API.
  */
 
 #include <benchmark/benchmark.h>
@@ -11,9 +14,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <span>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include <boost/capy/buffers.hpp>
 #include <boost/capy/ex/run_async.hpp>
@@ -24,7 +27,7 @@ namespace corosio = boost::corosio;
 namespace capy = boost::capy;
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::size_t BUFFER_SIZE = 65536;
+constexpr std::size_t READ_CHUNK = 65536;
 
 static int g_port = DEFAULT_PORT;
 
@@ -48,7 +51,6 @@ static capy::task<bool> run_benchmark_client(
     corosio::io_context& context,
     const char* ip,
     int port,
-    std::span<char> buffer,
     std::uint64_t& total_bytes
 ) {
     total_bytes = 0;
@@ -69,18 +71,17 @@ static capy::task<bool> run_benchmark_client(
         co_return false;
     }
 
+    std::vector<char> object;             // grows geometrically; at EOF it is the object
+    std::array<char, READ_CHUNK> chunk{};
+
     while (true) {
         auto [read_ec, n] = co_await socket.read_some(
-            capy::mutable_buffer(buffer.data(), buffer.size())
+            capy::mutable_buffer(chunk.data(), chunk.size())
         );
 
         if (n > 0) {
-            total_bytes += static_cast<std::uint64_t>(n);
-
-            benchmark::DoNotOptimize(buffer.data());
-            benchmark::DoNotOptimize(total_bytes);
-            benchmark::ClobberMemory();
-
+            object.insert(object.end(), chunk.data(), chunk.data() + n);
+            total_bytes = object.size();
             continue;
         }
 
@@ -97,10 +98,17 @@ static capy::task<bool> run_benchmark_client(
         }
     }
 
+    total_bytes = object.size();
+
+    // Touch the assembled object so the accumulation cannot be optimised away.
+    benchmark::DoNotOptimize(object.data());
+    benchmark::DoNotOptimize(total_bytes);
+    benchmark::ClobberMemory();
+
     co_return total_bytes > 0;
 }
 
-static void BM_TCP_FileDownload(benchmark::State& state) {
+static void BM_TCP_WholeObject(benchmark::State& state) {
     constexpr const char* ip = "127.0.0.1";
     const int port = g_port;
 
@@ -111,16 +119,9 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
         (void)_;
 
         corosio::io_context context;
-        std::array<char, BUFFER_SIZE> buffer{};
         std::uint64_t downloaded_bytes = 0;
 
-        auto task = run_benchmark_client(
-            context,
-            ip,
-            port,
-            std::span<char>(buffer.data(), buffer.size()),
-            downloaded_bytes
-        );
+        auto task = run_benchmark_client(context, ip, port, downloaded_bytes);
 
         capy::run_async(context.get_executor())(
             std::move(task)
@@ -143,7 +144,7 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
     state.counters["downloaded_bytes"] = static_cast<double>(last_downloaded_bytes);
 }
 
-BENCHMARK(BM_TCP_FileDownload)
+BENCHMARK(BM_TCP_WholeObject)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1)
     ->UseRealTime();

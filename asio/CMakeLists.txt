@@ -17,13 +17,25 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -Wall -Wextra -pedantic")
 
 find_package(Threads REQUIRED)
 
-# Si Asio no está instalada globalmente, ajusta esta ruta.
-set(ASIO_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/external/asio/asio/include")
+# Standalone ASIO is fetched automatically (no manual setup needed) unless
+# ASIO_INCLUDE_DIR already points at an existing checkout.
+set(ASIO_INCLUDE_DIR "" CACHE PATH "Path to ASIO standalone headers (leave empty to fetch automatically)")
+if(ASIO_INCLUDE_DIR STREQUAL "" OR NOT EXISTS "${ASIO_INCLUDE_DIR}/asio.hpp")
+    include(FetchContent)
+    FetchContent_Declare(asio_standalone
+        GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+        GIT_TAG asio-1-30-2
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(asio_standalone)
+    set(ASIO_INCLUDE_DIR "${asio_standalone_SOURCE_DIR}/asio/include" CACHE PATH
+        "Path to ASIO standalone headers" FORCE)
+endif()
 
 option(ASIO_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpclient)
+add_subdirectory(udpserver)
 
 if(ASIO_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)

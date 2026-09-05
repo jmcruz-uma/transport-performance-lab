@@ -29,3 +29,6 @@ csv/
 *.so
 *.dylib
 *.exe
+
+__pycache__/
+*.pyc

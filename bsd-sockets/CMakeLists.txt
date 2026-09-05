@@ -19,6 +19,7 @@ option(BSD_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpclient)
+add_subdirectory(udpserver)
 
 if(BSD_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)

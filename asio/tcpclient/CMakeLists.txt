@@ -10,7 +10,7 @@ target_compile_definitions(tcpclient
 
 target_include_directories(tcpclient
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/external/asio/asio/include
+        ${ASIO_INCLUDE_DIR}
 )
 
 target_link_libraries(tcpclient

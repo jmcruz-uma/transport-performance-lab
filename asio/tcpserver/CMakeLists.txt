@@ -8,6 +8,11 @@ target_compile_definitions(tcpserver
         ASIO_STANDALONE
 )
 
+target_include_directories(tcpserver
+    PRIVATE
+        ${ASIO_INCLUDE_DIR}
+)
+
 target_link_libraries(tcpserver
     PRIVATE
         Threads::Threads
