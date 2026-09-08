@@ -22,7 +22,11 @@
 #include <string>
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::size_t BUFFER_SIZE = 8192;
+// 64 KiB: the application receive buffer size used by every other arm, so the
+// comparison holds this constant. It is >= the maximum TLS record (16 KiB) and
+// large enough that per-call overhead over a 100 MB transfer is negligible; it is
+// not a tuned parameter and not derived from any kernel setting.
+constexpr std::size_t BUFFER_SIZE = 65536;
 
 static int g_port = DEFAULT_PORT;
 

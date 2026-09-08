@@ -32,7 +32,10 @@
 #include "tls_common.hpp"
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::size_t BUFFER_SIZE = 8192;
+// 64 KiB: matches every other arm's application receive buffer (comparability).
+// >= the max TLS record (16 KiB); per-call overhead over 100 MB is negligible;
+// not tuned, not derived from a kernel setting.
+constexpr std::size_t BUFFER_SIZE = 65536;
 
 static int g_port = DEFAULT_PORT;
 
