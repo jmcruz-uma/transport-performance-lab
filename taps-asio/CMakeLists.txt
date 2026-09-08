@@ -43,9 +43,16 @@ else()
     set(TAPS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(TAPS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     include(FetchContent)
+    # Track the tip of taps_cpp's default branch, NOT a pinned commit. Every
+    # feature that lands on taps_cpp main exists for these experiments and is
+    # validated there before being pushed; a frozen SHA here only creates a
+    # second place to get the version wrong (the bug we hit bumping 84e6522).
+    # build_release.sh wipes the build dir each run, so _deps/ is re-populated
+    # and this re-clones the current main every time. Do not re-pin this.
     FetchContent_Declare(taps_cpp
         GIT_REPOSITORY https://github.com/jmcruz-uma/taps_cpp.git
-        GIT_TAG 84e6522109acfb39965f7cccc84d1017a1e70677)
+        GIT_TAG main
+        GIT_SHALLOW TRUE)
     FetchContent_MakeAvailable(taps_cpp)
     # taps_cpp's own CMakeLists.txt defines TAPS::static (src/CMakeLists.txt).
 endif()
