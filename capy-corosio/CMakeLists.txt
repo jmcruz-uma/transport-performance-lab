@@ -19,21 +19,27 @@ option(COROSIO_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
 include(FetchContent)
 
+# capy and corosio are pre-release (no tags/releases) and develop on `develop`.
+# Pin exact commits so a fresh clone on any machine builds the identical library
+# and the campaign stays reproducible. develop HEADs as of 2026-09-06.
 FetchContent_Declare(capy
     GIT_REPOSITORY https://github.com/cppalliance/capy.git
-    GIT_TAG develop
-    GIT_SHALLOW TRUE
+    GIT_TAG c8157ab7d98184b5773676bbbe8e68df7bef77a5
 )
 
 FetchContent_Declare(corosio
     GIT_REPOSITORY https://github.com/cppalliance/corosio.git
-    GIT_TAG develop
-    GIT_SHALLOW TRUE
+    GIT_TAG dd75dfe199d9b506a154f8f6aa368ccc67eed1d6
 )
 
 FetchContent_MakeAvailable(capy corosio)
 
+# TLS scenarios (tls / tls_framed) need OpenSSL and the shared config header.
+find_package(OpenSSL REQUIRED)
+set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
+
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_tls)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 
