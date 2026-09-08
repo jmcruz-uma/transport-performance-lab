@@ -158,7 +158,7 @@ build_one() {
         "${extra_cmake_args[@]}"
 
     cmake --build "$build_dir" --config Release -j"$(nproc)" \
-        --target tcpserver tcpclient bench_tcp
+        --target tcpserver tcpserver_tls tcpclient bench_tcp bench_tcp_tls
 
     echo ""
     echo "TAPS TCP Release build completed with $compiler_label."

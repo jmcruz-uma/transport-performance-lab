@@ -59,11 +59,19 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# TLS scenarios (tls / tls_framed) need OpenSSL and the shared config header.
+# The TAPS arm reaches TLS through taps::SecurityParameters, not the raw OpenSSL
+# API, but still includes tls/tls_common.hpp for the pinned constants and prints
+# the same TLS_IDENTITY line for the cross-arm comparability check.
+find_package(OpenSSL REQUIRED)
+set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
+
 if(TAPS_ENABLE_BENCHMARKS)
     find_package(benchmark REQUIRED)
 endif()
 
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_tls)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 
