@@ -72,6 +72,7 @@ endif()
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpserver_tls)
+add_subdirectory(tcpserver_tls_framed)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 

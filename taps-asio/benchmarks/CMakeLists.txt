@@ -60,3 +60,22 @@ target_include_directories(bench_tcp_tls
 )
 
 target_compile_features(bench_tcp_tls PRIVATE cxx_std_23)
+
+# --- TLS framed benchmark (scenario "tls_framed") ----------------------------
+add_executable(bench_tcp_tls_framed bench_tcp_tls_framed.cpp)
+
+target_link_libraries(bench_tcp_tls_framed
+    PRIVATE
+        TAPS::static
+        Threads::Threads
+        benchmark::benchmark
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
+
+target_include_directories(bench_tcp_tls_framed
+    PRIVATE
+        ${TLS_COMMON_DIR}
+)
+
+target_compile_features(bench_tcp_tls_framed PRIVATE cxx_std_23)
