@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ASYNC_BERKELEY_DIR="/home/jagarcia/Escritorio/TFM/async-berkeley/async-berkeley" #YOUR PATH
-
-if [ ! -f "$ASYNC_BERKELEY_DIR/CMakeLists.txt" ]; then
-    echo "Error: async-berkeley was not found at $ASYNC_BERKELEY_DIR"
-    exit 1
-fi
-
 build_one() {
     local compiler="$1"
     local build_dir=""
     local compiler_label=""
     local c_compiler=""
     local cxx_compiler=""
+    local cxx_flags=""
 
     case "$compiler" in
       gcc)
         build_dir="build-gcc"
         compiler_label="GCC 14"
-        c_compiler="/usr/local/gcc-14.1.0/bin/gcc-14.1.0"
-        cxx_compiler="/usr/local/gcc-14.1.0/bin/g++-14.1.0"
+        c_compiler="gcc-14"
+        cxx_compiler="g++-14"
         ;;
       clang)
         build_dir="build-clang"
-        compiler_label="Clang"
+        compiler_label="Clang (libc++)"
         c_compiler="clang"
         cxx_compiler="clang++"
+        # libc++ instead of the system's libstdc++: keeps energy/perf numbers
+        # representative of clang's own standard library rather than GCC's,
+        # and sidesteps clang picking up headers from whichever GCC version
+        # happens to be newest on the machine (it broke against GCC 16 here).
+        cxx_flags="-stdlib=libc++"
         ;;
       *)
         echo "Unsupported compiler: $compiler"
@@ -48,9 +47,9 @@ build_one() {
 
     cmake -S . -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DASYNC_BERKELEY_DIR="$ASYNC_BERKELEY_DIR" \
         -DCMAKE_C_COMPILER="$c_compiler" \
-        -DCMAKE_CXX_COMPILER="$cxx_compiler"
+        -DCMAKE_CXX_COMPILER="$cxx_compiler" \
+        -DCMAKE_CXX_FLAGS="$cxx_flags"
 
     cmake --build "$build_dir" --config Release -j"$(nproc)" \
         --target tcpserver tcpclient bench_tcp

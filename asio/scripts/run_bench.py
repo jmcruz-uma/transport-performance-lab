@@ -144,6 +144,13 @@ CASE_CACHE_TRASH_ENABLED = True
 CASE_CACHE_TRASH_SIZE_MB = 1024
 CASE_DROP_CACHES = True
 CASE_COOLDOWN_SECONDS = 20
+# Short pause between repetitions of the SAME case: lets ephemeral ports and
+# short-lived processes clear and the CPU shed the previous burst's heat,
+# without dropping the warm page cache mid-case (that's a legitimate part of
+# what's being measured, not noise). Deliberately much shorter than the
+# case-boundary cooldown above, which resets state for a genuinely new
+# configuration.
+REP_COOLDOWN_SECONDS = 3
 
 # =========================
 # SERVER PROCESS
@@ -547,6 +554,26 @@ def settle_between_cases():
     time.sleep(CASE_COOLDOWN_SECONDS)
 
 
+
+def settle_between_repetitions():
+    if REP_COOLDOWN_SECONDS <= 0:
+        return
+    time.sleep(REP_COOLDOWN_SECONDS)
+
+
+
+def settle_before_campaign():
+    # Same reset as a case-boundary, but for a bigger transition: a new
+    # (compiler, server_threads) campaign is about to start (which also
+    # covers scenario-to-scenario transitions, since each scenario's first
+    # campaign goes through here too).
+    case_level_cache_trash()
+    if CASE_COOLDOWN_SECONDS <= 0:
+        return
+    log(f"Cooling down for {CASE_COOLDOWN_SECONDS} seconds before starting a new compiler/thread-count campaign...")
+    time.sleep(CASE_COOLDOWN_SECONDS)
+
+
 # =========================
 # BENCH EXECUTION
 # =========================
@@ -728,6 +755,8 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
 
 
 def run_campaign_for_compiler_and_threads(compiler, server_threads):
+    settle_before_campaign()
+
     file_size_bytes = get_file_size()
     results = []
 
@@ -757,6 +786,7 @@ def run_campaign_for_compiler_and_threads(compiler, server_threads):
                     actual_port,
                 )
                 results.append(result)
+                settle_between_repetitions()
     finally:
         stop_server(server, server_stdout, server_stderr, actual_port)
 

@@ -1,4 +1,18 @@
-find_package(benchmark REQUIRED)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # The system's libbenchmark-dev is built against libstdc++; linking it
+    # into a -stdlib=libc++ binary breaks on std::string/vector ABI, so
+    # Clang builds its own copy instead (same version as the system package).
+    include(FetchContent)
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(googlebenchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.8.3)
+    FetchContent_MakeAvailable(googlebenchmark)
+else()
+    find_package(benchmark REQUIRED)
+endif()
 
 add_executable(bench_tcp bench_tcp.cpp)
 

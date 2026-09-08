@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(TAPS_TCP_USE_LIBCXX)
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++)
+endif()
+
 # taps_cpp is fetched from GitHub by default (no manual build/install needed,
 # and it self-fetches its own ASIO dependency in turn); set TAPS_ROOT yourself
 # to reuse an existing install (an <install>/include + <install>/lib/libtaps.a
