@@ -33,7 +33,12 @@ endif()
 
 option(ASIO_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
+# TLS scenarios (tls / tls_framed) need OpenSSL and the shared config header.
+find_package(OpenSSL REQUIRED)
+set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
+
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_tls)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 

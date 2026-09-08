@@ -30,5 +30,11 @@ csv/
 *.dylib
 *.exe
 
+# Generated TLS material (per-machine, throwaway) and payload hash
+tls/*.crt
+tls/*.key
+tls/*.srl
+files/*.sha256
+
 __pycache__/
 *.pyc

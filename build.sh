@@ -105,6 +105,13 @@ ensure_pypdf() {
   exit 1
 }
 
+setup_tls_assets() {
+  log "Preparing shared TLS assets (certificates + deterministic payload)"
+  chmod +x "$ROOT_DIR/tls/gen_certs.sh" "$ROOT_DIR/tls/gen_payload.sh"
+  "$ROOT_DIR/tls/gen_certs.sh"
+  "$ROOT_DIR/tls/gen_payload.sh"
+}
+
 build_project() {
   local project_dir="$1"
   local full_dir="$ROOT_DIR/$project_dir"
@@ -135,6 +142,7 @@ main() {
   ensure_basic_tools
   ensure_matplotlib
   ensure_pypdf
+  setup_tls_assets
 
   for project_dir in "${PROJECT_DIRS[@]}"; do
     build_project "$project_dir"

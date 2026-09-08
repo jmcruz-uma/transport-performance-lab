@@ -43,10 +43,23 @@ from pathlib import Path
 _TCP_GRID = dict(cases=[1, 2, 4, 8, 16], threads=[1, 2, 4, 8])
 _UDP_GRID = dict(cases=[1, 2, 4, 8], threads=[1, 2, 4])
 
+# The tls / tls_framed scenarios add a TLS 1.3 record layer to the streaming and
+# framed models. Cert/CA paths are relative to each subproject dir (run_bench.py's
+# cwd). The pinned TLS parameters live in tls/tls_common.hpp; every arm's server
+# and client print a TLS_IDENTITY line the runner checks for equality.
+_TLS_ENV = {"TLS_CERT": "../tls/server.crt",
+            "TLS_KEY":  "../tls/server.key",
+            "TLS_CA":   "../tls/ca.crt"}
+
 SCENARIOS = {
     "streaming":    dict(server="tcpserver", bench="bench_tcp",        **_TCP_GRID),
     "whole_object": dict(server="tcpserver", bench="bench_tcp_whole",  **_TCP_GRID),
     "blocks":       dict(server="tcpserver", bench="bench_tcp_blocks", **_TCP_GRID),
+    "tls":          dict(server="tcpserver_tls", bench="bench_tcp_tls",
+                         env=dict(_TLS_ENV), **_TCP_GRID),
+    "tls_framed":   dict(server="tcpserver_tls_framed", bench="bench_tcp_tls_framed",
+                         env={**_TLS_ENV, "TLS_MANIFEST": "../tls/manifest.txt"},
+                         **_TCP_GRID),
     # 65507 = 65535 - 8 (UDP header) - 20 (IPv4 header): the true max IPv4 UDP
     # payload. 65536 ("64 KiB" literally) is one byte over it and every
     # sendto() of that size fails with EMSGSIZE -- confirmed against this box.

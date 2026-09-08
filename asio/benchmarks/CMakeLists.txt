@@ -99,3 +99,28 @@ target_link_libraries(bench_udp
         benchmark::benchmark_main
         Threads::Threads
 )
+
+# --- TLS streaming benchmark (scenario "tls") ---------------------------------
+add_executable(bench_tcp_tls bench_tcp_tls.cpp)
+
+target_compile_features(bench_tcp_tls PRIVATE cxx_std_23)
+
+target_compile_definitions(bench_tcp_tls
+    PRIVATE
+        ASIO_STANDALONE
+)
+
+target_include_directories(bench_tcp_tls
+    PRIVATE
+        ${ASIO_INCLUDE_DIR}
+        ${TLS_COMMON_DIR}
+)
+
+target_link_libraries(bench_tcp_tls
+    PRIVATE
+        benchmark::benchmark
+        benchmark::benchmark_main
+        Threads::Threads
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
