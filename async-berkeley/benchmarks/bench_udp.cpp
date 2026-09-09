@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +41,10 @@ using message = socket_message<sockaddr_in>;
 
 constexpr int DEFAULT_PORT = 8080;
 constexpr std::size_t RECV_BUFFER_BYTES = 65536;
+// Same wall-clock bound on the receive as every other arm's UDP client (asio /
+// taps / corosio use a 5 s timer race; bsd a 5 s SO_RCVTIMEO): if the server's
+// zero-length sentinel is lost, stop with whatever arrived instead of hanging.
+constexpr int RECV_TIMEOUT_SECONDS = 5;
 
 static int g_port = DEFAULT_PORT;
 
@@ -145,7 +150,18 @@ static bool run_benchmark_client(
 
     scope.spawn(std::move(operation));
 
-    while (!state->done && trigs.wait()) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(RECV_TIMEOUT_SECONDS);
+    while (!state->done) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            break;  // sentinel lost: stop with whatever arrived so far
+        }
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        if (trigs.wait_for(static_cast<int>(remaining > 0 ? remaining : 1)) == 0) {
+            break;  // poll timed out, or nothing left pending
+        }
     }
 
     total_bytes = state->total_bytes;
