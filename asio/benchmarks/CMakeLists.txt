@@ -124,3 +124,28 @@ target_link_libraries(bench_tcp_tls
         OpenSSL::SSL
         OpenSSL::Crypto
 )
+
+# --- TLS framed benchmark (scenario "tls_framed") ---------------------------
+add_executable(bench_tcp_tls_framed bench_tcp_tls_framed.cpp)
+
+target_compile_features(bench_tcp_tls_framed PRIVATE cxx_std_23)
+
+target_compile_definitions(bench_tcp_tls_framed
+    PRIVATE
+        ASIO_STANDALONE
+)
+
+target_include_directories(bench_tcp_tls_framed
+    PRIVATE
+        ${ASIO_INCLUDE_DIR}
+        ${TLS_COMMON_DIR}
+)
+
+target_link_libraries(bench_tcp_tls_framed
+    PRIVATE
+        benchmark::benchmark
+        benchmark::benchmark_main
+        Threads::Threads
+        OpenSSL::SSL
+        OpenSSL::Crypto
+)
