@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -27,7 +28,12 @@
 
 constexpr int DEFAULT_PORT = 8080;
 constexpr std::size_t RECV_BUFFER_BYTES = 65536;
+// Wall-clock bound on the whole receive, matching every other arm's UDP client
+// (asio / taps / corosio race a 5 s timer against the exchange; async-berkeley
+// polls to a 5 s deadline). SO_RCVTIMEO below is set short, only as a poll
+// granularity so the deadline can be checked; it is NOT a 5 s idle timeout.
 constexpr int RECV_TIMEOUT_SECONDS = 5;
+constexpr int RECV_POLL_MS = 200;
 
 static int g_port = DEFAULT_PORT;
 
@@ -38,7 +44,7 @@ static int connect_to_server(const std::string& server_ip, int port) {
     }
 
     timeval tv{};
-    tv.tv_sec = RECV_TIMEOUT_SECONDS;
+    tv.tv_usec = RECV_POLL_MS * 1000;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     sockaddr_in server{};
@@ -68,6 +74,8 @@ static bool receive_datagrams(int sock, std::uint64_t& total_bytes) {
     }
 
     std::array<char, RECV_BUFFER_BYTES> buffer{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(RECV_TIMEOUT_SECONDS);
 
     while (true) {
         const ssize_t n = recv(sock, buffer.data(), buffer.size(), 0);
@@ -88,7 +96,14 @@ static bool receive_datagrams(int sock, std::uint64_t& total_bytes) {
             continue;
         }
 
-        // Timeout or other error: stop here with whatever arrived so far.
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            if (std::chrono::steady_clock::now() < deadline) {
+                continue;  // poll slice elapsed, deadline not reached: keep waiting
+            }
+            break;  // sentinel lost: stop with whatever arrived so far
+        }
+
+        // Real error: stop here with whatever arrived so far.
         break;
     }
 
