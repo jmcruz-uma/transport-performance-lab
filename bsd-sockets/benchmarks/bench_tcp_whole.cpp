@@ -26,6 +26,12 @@
 
 constexpr int DEFAULT_PORT = 8080;
 constexpr std::size_t READ_CHUNK = 65536;
+// Generous up-front estimate of the transfer size. A real client that asks for
+// the whole object as one blob would size this from a Content-Length / stat; the
+// harness transfers a fixed ~100 MiB file, so 128 MiB reserves enough that the
+// accumulation is one pass of copies, not repeated geometric reallocation --
+// matching the TAPS arm, whose runtime allocates the final buffer once.
+constexpr std::size_t RESERVE_HINT_BYTES = 128ull * 1024 * 1024;
 
 static int g_port = DEFAULT_PORT;
 
@@ -53,7 +59,8 @@ static int connect_to_server(const std::string& server_ip, int port) {
 }
 
 static bool receive_whole_object(int sock, std::uint64_t& total_bytes) {
-    std::vector<char> object;        // grows geometrically; at EOF it is the object
+    std::vector<char> object;
+    object.reserve(RESERVE_HINT_BYTES);  // one pass of copies, not repeated realloc
     std::array<char, READ_CHUNK> chunk{};
 
     while (true) {
