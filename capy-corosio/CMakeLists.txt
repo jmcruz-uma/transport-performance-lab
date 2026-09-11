@@ -40,6 +40,7 @@ set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
 
 add_subdirectory(tcpserver)
 add_subdirectory(tcpserver_tls)
+add_subdirectory(tcpserver_tls_framed)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 
