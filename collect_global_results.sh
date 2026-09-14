@@ -1,4 +1,23 @@
 #!/usr/bin/env bash
+# Standalone global-results collection + master-table generation, factored
+# out of run.sh so it can be run again AFTER the D7 netem sweep too.
+#
+# Why this needs to exist separately from run.sh: run.sh already collects
+# and builds master tables for whatever labels exist at the point it
+# finishes (the loopback baseline, RTT=0) -- but run_everything.sh's stage 5
+# (netem/run_rtt_sweep.sh) runs AFTER run.sh and creates dozens/hundreds more
+# labels (results/<scenario>__netem_rtt_<R>ms_loss_<L>pct/ in every project).
+# Nothing was re-running the collection afterwards, so the entire D7 sweep --
+# the main new experiment this repo was extended for -- would sit correctly
+# in each project's results/ but NEVER make it into global_results/ or get a
+# master comparison table. Found 2026-09-15, auditing the deployment plan for
+# gaps ahead of the real-machine run, specifically because of that question.
+# run_everything.sh now calls this script as its final stage, after both
+# run.sh and the netem sweep have finished, so every label -- baseline and
+# every D7 grid point -- gets collected in one pass. Safe/idempotent to also
+# run by hand at any time (e.g. mid-campaign, to check progress): re-copying
+# already-collected files is harmless, and copy_if_exists silently skips a
+# scenario that hasn't produced results yet.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,9 +41,7 @@ PER_PROJECT_DIR="$GLOBAL_RESULTS_DIR/per_project"
 LOGS_DIR="$GLOBAL_RESULTS_DIR/logs"
 MANIFESTS_DIR="$GLOBAL_RESULTS_DIR/manifests"
 
-SYSTEM_INFO_TXT="$GLOBAL_RESULTS_DIR/system_info.txt"
-RUN_LOG="$LOGS_DIR/run_log.txt"
-RUN_MANIFEST_JSON="$MANIFESTS_DIR/run_manifest.json"
+MERGE_PDFS_AT_END="${MERGE_PDFS_AT_END:-1}"
 
 PROJECT_DIRS=(
   "asio"
@@ -34,20 +51,8 @@ PROJECT_DIRS=(
   "capy-corosio"
 )
 
-SETTLE_SECONDS_BEFORE="${SETTLE_SECONDS_BEFORE:-20}"
-SETTLE_SECONDS_AFTER="${SETTLE_SECONDS_AFTER:-20}"
-WARMUP_ENABLED="${WARMUP_ENABLED:-0}"
-WARMUP_PROJECTS="${WARMUP_PROJECTS:-1}"
-CACHE_TRASH_ENABLED="${CACHE_TRASH_ENABLED:-1}"
-CACHE_TRASH_SIZE_MB="${CACHE_TRASH_SIZE_MB:-2048}"
-RANDOMIZE_ORDER="${RANDOMIZE_ORDER:-0}"
-MERGE_PDFS_AT_END="${MERGE_PDFS_AT_END:-1}"
-MEASURE_IDLE_AT_START="${MEASURE_IDLE_AT_START:-1}"
-
 log() {
-  local msg="[$(date '+%H:%M:%S')] $*"
-  echo "$msg"
-  echo "$msg" >> "$RUN_LOG"
+  printf '[%s] [collect-results] %s\n' "$(date '+%H:%M:%S')" "$*"
 }
 
 need_cmd() {
@@ -73,130 +78,6 @@ prepare_dirs() {
     "$PER_PROJECT_DIR" \
     "$LOGS_DIR" \
     "$MANIFESTS_DIR"
-
-  : > "$RUN_LOG"
-}
-
-save_manifest() {
-  cat > "$RUN_MANIFEST_JSON" <<EOF
-{
-  "root_dir": "$ROOT_DIR",
-  "global_results_dir": "$GLOBAL_RESULTS_DIR",
-  "raw_dir": "$RAW_DIR",
-  "summaries_dir": "$SUMMARIES_DIR",
-  "csv_dir": "$CSV_DIR",
-  "reports_dir": "$REPORTS_DIR",
-  "global_reports_dir": "$GLOBAL_REPORTS_DIR",
-  "merged_reports_dir": "$MERGED_REPORTS_DIR",
-  "plots_dir": "$PLOTS_DIR",
-  "global_plots_dir": "$GLOBAL_PLOTS_DIR",
-  "per_project_dir": "$PER_PROJECT_DIR",
-  "logs_dir": "$LOGS_DIR",
-  "manifests_dir": "$MANIFESTS_DIR",
-  "master_json_pattern": "$SUMMARIES_DIR/<label>/master_summary__<label>.json",
-  "master_csv_pattern": "$CSV_DIR/master_summary__<label>.csv",
-  "master_pdf_pattern": "$GLOBAL_REPORTS_DIR/master__<label>.pdf",
-  "system_info_txt": "$SYSTEM_INFO_TXT",
-  "run_log": "$RUN_LOG",
-  "settle_seconds_before": $SETTLE_SECONDS_BEFORE,
-  "settle_seconds_after": $SETTLE_SECONDS_AFTER,
-  "warmup_enabled": $WARMUP_ENABLED,
-  "warmup_projects": $WARMUP_PROJECTS,
-  "cache_trash_enabled": $CACHE_TRASH_ENABLED,
-  "cache_trash_size_mb": $CACHE_TRASH_SIZE_MB,
-  "randomize_order": $RANDOMIZE_ORDER,
-  "merge_pdfs_at_end": $MERGE_PDFS_AT_END,
-  "measure_idle_at_start": $MEASURE_IDLE_AT_START
-}
-EOF
-}
-
-save_system_info() {
-  {
-    echo "==== BENCHMARK SYSTEM INFO ===="
-    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
-    echo
-    echo "==== uname -a ===="
-    uname -a || true
-    echo
-    echo "==== hostnamectl ===="
-    hostnamectl || true
-    echo
-    echo "==== lscpu ===="
-    lscpu || true
-    echo
-    echo "==== free -h ===="
-    free -h || true
-    echo
-    echo "==== lsblk ===="
-    lsblk || true
-    echo
-    echo "==== governors ===="
-    grep . /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null || true
-    echo
-    echo "==== /proc/cmdline ===="
-    cat /proc/cmdline || true
-    echo
-    echo "==== env ===="
-    env | sort
-  } > "$SYSTEM_INFO_TXT"
-}
-
-measure_idle_if_available() {
-  if [ "$MEASURE_IDLE_AT_START" != "1" ]; then
-    log "Idle measurement disabled"
-    return
-  fi
-
-  local idle_script="$ROOT_DIR/measure_idle_energy.py"
-
-  if [ ! -f "$idle_script" ]; then
-    log "measure_idle_energy.py not found at repository root; continuing without a new idle measurement"
-    return
-  fi
-
-  log "Measuring system idle baseline..."
-  python3 "$idle_script"
-}
-
-trash_caches_best_effort() {
-  if [ "$CACHE_TRASH_ENABLED" != "1" ]; then
-    return
-  fi
-
-  log "Cache trashing best-effort (${CACHE_TRASH_SIZE_MB} MB)..."
-
-  python3 - <<PY
-size_mb = int("${CACHE_TRASH_SIZE_MB}")
-chunk = 1024 * 1024
-buf = bytearray(chunk)
-acc = 0
-
-for i in range(size_mb):
-    for j in range(0, len(buf), 4096):
-        buf[j] = (i + j) & 0xFF
-        acc ^= buf[j]
-
-print(acc)
-PY
-
-  if [ -w /proc/sys/vm/drop_caches ]; then
-    log "Dropping page cache (best-effort)"
-    sync || true
-    echo 3 > /proc/sys/vm/drop_caches || true
-  else
-    log "No permission to write /proc/sys/vm/drop_caches; continuing"
-  fi
-}
-
-settle_before() {
-  log "Cooldown BEFORE next project: ${SETTLE_SECONDS_BEFORE}s"
-  sleep "$SETTLE_SECONDS_BEFORE"
-}
-
-settle_after() {
-  log "Cooldown AFTER project: ${SETTLE_SECONDS_AFTER}s"
-  sleep "$SETTLE_SECONDS_AFTER"
 }
 
 copy_if_exists() {
@@ -210,26 +91,10 @@ copy_if_exists() {
   fi
 }
 
+# Identical to run.sh's copy_project_artifacts_if_exist -- see its comments
+# there for the full rationale (the flat-path bug this replaced, and why
+# results are kept per-label rather than merged).
 copy_project_artifacts_if_exist() {
-  # run_bench.py has ALWAYS written per-scenario, at results/<scenario>/... --
-  # never at the flat results/... this function used to look at (see
-  # bench_scenarios.py's _activate_scenario: RESULTS_DIR = ./results/<name>).
-  # That meant global_results/ silently collected nothing from any real
-  # multi-scenario campaign -- found 2026-09-15 while reviewing this ahead of
-  # the real-machine deployment, well before it, not after. Fixed by iterating
-  # every results/<label>/ subdirectory a project has (a plain scenario name
-  # like "streaming", or a netem-swept one like
-  # "tls__netem_rtt_10ms_loss_1pct" from netem/run_rtt_sweep.sh) instead of
-  # assuming there is exactly one.
-  #
-  # Collected under a per-LABEL subdirectory (not flattened with the project
-  # name in the filename) specifically so build_master_tables() can point
-  # build_master_summary.py at one label's summaries and get a clean,
-  # apples-to-apples comparison of the 5 libraries under that one condition --
-  # mixing scenarios/netem-points into one global table would silently
-  # compare e.g. asio-streaming-loopback against
-  # taps-asio-tls-under-10ms-RTT-1pct-loss as if they were peers, which is
-  # not a valid comparison.
   local project_dir="$1"
   local project_results_root="$ROOT_DIR/$project_dir/results"
 
@@ -244,9 +109,6 @@ copy_project_artifacts_if_exist() {
     local label
     label="$(basename "${label_path%/}")"
 
-    # Never collect the netem sweep's own safety-stash directories (see
-    # netem/run_rtt_sweep.sh: stash_preexisting_results / relocate_results) --
-    # those are deliberately-preserved leftovers, not this run's results.
     case "$label" in
       *__preexisting_backup_*|*__superseded_*) continue ;;
     esac
@@ -286,10 +148,6 @@ copy_project_artifacts_if_exist() {
       "$results_dir/raw/macro_bench_results.json" \
       "$RAW_DIR/$label/${project_dir}_raw.json"
 
-    # Filename here (not $label) is what build_master_summary.py's
-    # infer_library_name() turns into the "library" -- keeping it as the
-    # plain project name is what makes it match LIBRARY_ORDER/
-    # LIBRARY_DISPLAY_NAMES/LIBRARY_COLORS for proper styling in the report.
     copy_if_exists \
       "$results_dir/raw/macro_bench_summary.json" \
       "$SUMMARIES_DIR/$label/${project_dir}_summary.json"
@@ -352,63 +210,8 @@ copy_project_artifacts_if_exist() {
   fi
 }
 
-run_project_once() {
-  local project_dir="$1"
-  local full_dir="$ROOT_DIR/$project_dir"
-  local run_script="$full_dir/scripts/run_bench.py"
-
-  if [ ! -d "$full_dir" ]; then
-    log "Skipping $project_dir: directory not found"
-    return
-  fi
-
-  if [ ! -f "$run_script" ]; then
-    log "Skipping $project_dir: scripts/run_bench.py not found"
-    return
-  fi
-
-  trash_caches_best_effort
-  settle_before
-
-  log "Running benchmarks for $project_dir"
-  (
-    cd "$full_dir"
-    python3 scripts/run_bench.py
-  )
-
-  copy_project_artifacts_if_exist "$project_dir"
-  settle_after
-}
-
-warmup_phase() {
-  if [ "$WARMUP_ENABLED" != "1" ]; then
-    log "Warmup disabled"
-    return
-  fi
-
-  log "Warmup phase enabled"
-
-  local count=0
-  for project_dir in "${PROJECT_DIRS[@]}"; do
-    if [ "$count" -ge "$WARMUP_PROJECTS" ]; then
-      break
-    fi
-
-    local full_dir="$ROOT_DIR/$project_dir"
-    local run_script="$full_dir/scripts/run_bench.py"
-
-    if [ -d "$full_dir" ] && [ -f "$run_script" ]; then
-      log "Warmup with $project_dir"
-      (
-        cd "$full_dir"
-        python3 scripts/run_bench.py >/dev/null 2>&1 || true
-      )
-      count=$((count + 1))
-      settle_after
-    fi
-  done
-}
-
+# Identical to run.sh's build_master_tables -- one master table/PDF per
+# label, never a single table mixing scenarios/netem-points together.
 build_master_tables() {
   local script="$ROOT_DIR/build_master_summary.py"
 
@@ -422,9 +225,6 @@ build_master_tables() {
     return
   fi
 
-  # One master table/PDF per label (scenario, or scenario+netem-point) --
-  # see copy_project_artifacts_if_exist for why these must not be merged
-  # into a single cross-scenario table.
   local label_dir label
   for label_dir in "$SUMMARIES_DIR"/*/; do
     [ -d "$label_dir" ] || continue
@@ -472,23 +272,56 @@ merge_reports() {
 
   log "Merging categorized PDF reports..."
   # Deliberately not fatal (this script has `set -e`): the master tables --
-  # the actually valuable output -- are already written to disk by the time
-  # this runs. Losing the convenience "one merged PDF" step (e.g. because
-  # pypdf isn't importable for some reason) must not abort the whole
-  # campaign or look like everything failed. Found 2026-09-15 testing this
-  # against real data on WSL2, where pypdf genuinely wasn't installed yet.
+  # the actually valuable output of this whole script -- are already written
+  # to disk by the time this runs. Losing the convenience "one merged PDF"
+  # step (e.g. because pypdf isn't importable for some reason) must not look
+  # like the whole collection failed and must not discard everything that
+  # already succeeded. Found 2026-09-15 testing this against real data on
+  # WSL2, where pypdf genuinely wasn't installed yet.
   if ! python3 "$script" --input-dir "$REPORTS_DIR" --output-dir "$MERGED_REPORTS_DIR"; then
     log "WARNING: merge.py failed (see the traceback above, likely a missing 'pypdf' module)."
-    log "Every per-label master table/CSV/PDF is still valid -- only the merged-PDF" \
-        "convenience step was skipped."
+    log "Every per-label master table/CSV/PDF above is still valid -- only the merged-PDF" \
+        "convenience step was skipped. Fix pypdf (preflight.sh does) and rerun this script" \
+        "if you want the merged PDFs too; nothing else needs to be redone."
+  fi
+}
+
+# D2 comparability check (tls/check_identity.py): confirms every arm's TLS
+# server+client actually negotiated identical parameters, across the
+# baseline AND every D7 netem grid point -- catches e.g. one arm rebuilt
+# after a system OpenSSL upgrade while the others weren't. Deliberately not
+# fatal (this script has `set -e` and this must not discard the collection
+# work already done above): a mismatch means "don't trust cross-arm TLS
+# comparisons yet", not "this run produced nothing useful" -- every
+# non-TLS scenario's results are unaffected either way. Was a manual,
+# easy-to-forget step before 2026-09-15; now runs every time collection
+# does, so it can't be forgotten across 170+ unattended grid points.
+run_identity_check() {
+  local script="$ROOT_DIR/tls/check_identity.py"
+  local out="$GLOBAL_RESULTS_DIR/tls_identity_check.txt"
+
+  if [ ! -f "$script" ]; then
+    log "tls/check_identity.py not found; skipping the D2 comparability check"
+    return
+  fi
+
+  log "Running the D2 TLS comparability check (tls/check_identity.py)..."
+  if python3 "$script" --root "$ROOT_DIR" > "$out" 2>&1; then
+    log "D2 check: OK -- every arm's TLS parameters agree (full output: $out)"
+  else
+    log "*********************************************************************"
+    log "WARNING: D2 TLS comparability check FAILED -- see $out"
+    log "This means at least one arm's negotiated TLS parameters (OpenSSL"
+    log "version/cipher/ALPN) drifted from the others, for the tls/tls_framed"
+    log "scenarios (baseline and/or a netem grid point). Every OTHER scenario's"
+    log "results are unaffected. Do not treat cross-arm TLS comparisons as"
+    log "valid until this is investigated -- read $out for exactly which"
+    log "arm/label disagreed."
+    log "*********************************************************************"
   fi
 }
 
 main() {
-  prepare_dirs
-  save_manifest
-  save_system_info
-
   log "Repository root: $ROOT_DIR"
   log "Global results directory: $GLOBAL_RESULTS_DIR"
 
@@ -497,33 +330,22 @@ main() {
     exit 1
   fi
 
-  measure_idle_if_available
+  prepare_dirs
 
-  local projects=("${PROJECT_DIRS[@]}")
-
-  if [ "$RANDOMIZE_ORDER" = "1" ]; then
-    if need_cmd shuf; then
-      mapfile -t projects < <(printf '%s\n' "${PROJECT_DIRS[@]}" | shuf)
-      log "Randomized project order enabled: ${projects[*]}"
-    else
-      log "shuf not available; keeping the original project order"
-    fi
-  fi
-
-  warmup_phase
-
-  for project_dir in "${projects[@]}"; do
-    run_project_once "$project_dir"
+  for project_dir in "${PROJECT_DIRS[@]}"; do
+    copy_project_artifacts_if_exist "$project_dir"
   done
 
   build_master_tables
   merge_reports
+  run_identity_check
 
-  log "Global execution finished"
+  log "Collection finished."
   log "Master tables (one per scenario/netem-point label): $SUMMARIES_DIR/master_summary__<label>.json"
   log "Master CSVs: $CSV_DIR/master_summary__<label>.csv"
   log "Master PDFs: $GLOBAL_REPORTS_DIR/master__<label>.pdf"
   log "Merged reports directory: $MERGED_REPORTS_DIR"
+  log "D2 TLS comparability check: $GLOBAL_RESULTS_DIR/tls_identity_check.txt"
 }
 
 main "$@"

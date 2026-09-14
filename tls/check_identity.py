@@ -16,8 +16,17 @@ after a system OpenSSL upgrade while the others were not, or a stray
 TLS_CERT/TLS_CA env var pointing somewhere unexpected.
 
 Reads the TLS_IDENTITY lines run_bench.py already captures into each arm's
-results/<scenario>/logs/*.log (server stdout+stderr, every bench process's
-stderr) -- no extra instrumentation needed.
+results/<label>/logs/*.log (server stdout+stderr, every bench process's
+stderr) -- no extra instrumentation needed. <label> is the plain scenario
+name (loopback baseline) OR any of its D7 netem-swept variants
+(f"{scenario}__netem_rtt_<R>ms_loss_<L>pct", from netem/run_rtt_sweep.sh) --
+every one of them is scanned and pooled together, since simulated RTT/loss
+has no business changing which TLS parameters got negotiated.
+
+As of 2026-09-15 this is invoked automatically (non-fatally -- a mismatch is
+logged loudly, not treated as a reason to abort a campaign whose data is
+already collected) by collect_global_results.sh, so it no longer has to be
+remembered and run by hand while someone is standing at the machine.
 
 Usage:
     tls/check_identity.py [--scenario tls|tls_framed|both] [--arm ARM ...] [--root PATH]
@@ -46,26 +55,52 @@ IDENTITY_RE = re.compile(
 FIELDS = ("openssl", "version", "cipher", "alpn")
 
 
-def find_identities(root: Path, arm: str, scenario: str):
-    """{who: fields} for the first reading of each `who` found in this arm's
-    captured logs, plus a synthetic f"{who}!inconsistent" entry (with the
-    LAST disagreeing reading) if later log files disagree with the first."""
-    logs_dir = root / arm / "results" / scenario / "logs"
-    found = {}
-    if not logs_dir.is_dir():
-        return found
-    for log_path in sorted(logs_dir.glob("*.log")):
-        try:
-            text = log_path.read_text(errors="replace")
-        except OSError:
+def label_dirs_for_scenario(root: Path, arm: str, scenario: str):
+    """Every results/<label>/ that belongs to this scenario -- the plain
+    label itself (loopback baseline) plus every D7 netem-swept variant
+    (netem/run_rtt_sweep.sh names those f"{scenario}__netem_rtt_<R>ms_loss_<L>pct").
+    TLS identity (OpenSSL version/cipher/ALPN) shouldn't depend on simulated
+    RTT/loss at all, so pooling every label's readings together and checking
+    they all still agree is exactly the right check -- and it's the only way
+    this script sees the netem-swept results at all, since they never live
+    under the plain results/<scenario>/ path once relocated."""
+    results_root = root / arm / "results"
+    if not results_root.is_dir():
+        return []
+    dirs = []
+    for p in sorted(results_root.iterdir()):
+        if not p.is_dir():
             continue
-        for m in IDENTITY_RE.finditer(text):
-            who = m.group("who")
-            fields = {k: m.group(k) for k in FIELDS}
-            if who not in found:
-                found[who] = fields
-            elif found[who] != fields:
-                found[f"{who}!inconsistent"] = fields
+        if p.name == scenario or p.name.startswith(f"{scenario}__"):
+            dirs.append(p)
+    return dirs
+
+
+def find_identities(root: Path, arm: str, scenario: str):
+    """{who: fields} for the first reading of each `who` found across every
+    results/<label>/logs/ this scenario has (baseline + every netem grid
+    point), plus a synthetic f"{who}!inconsistent" entry (with the LAST
+    disagreeing reading) if later log files disagree with the first. `who`
+    is tagged with the originating label so a mismatch report says exactly
+    which grid point it came from."""
+    found = {}
+    for label_dir in label_dirs_for_scenario(root, arm, scenario):
+        logs_dir = label_dir / "logs"
+        if not logs_dir.is_dir():
+            continue
+        label = label_dir.name
+        for log_path in sorted(logs_dir.glob("*.log")):
+            try:
+                text = log_path.read_text(errors="replace")
+            except OSError:
+                continue
+            for m in IDENTITY_RE.finditer(text):
+                who = f"{m.group('who')}[{label}]"
+                fields = {k: m.group(k) for k in FIELDS}
+                if who not in found:
+                    found[who] = fields
+                elif found[who] != fields:
+                    found[f"{who}!inconsistent"] = fields
     return found
 
 

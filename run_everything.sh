@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 # The one command for the measurement machine: preflight check -> build ->
 # smoke test -> baseline campaign (loopback, every scenario) -> D7 netem
-# RTT x loss sweep (netns+veth, every scenario). Meant to be started and left
-# running unattended for a day or more -- every stage is logged to a
-# timestamped file under campaign_logs/, and campaign_status.txt at the repo
-# root always holds a one-line answer to "is it still going, and if not, why
-# did it stop" without having to read the full log.
+# RTT x loss sweep (netns+veth, every scenario) -> collect everything into
+# global_results/. Meant to be started and left running unattended for a day
+# or more -- every stage is logged to a timestamped file under
+# campaign_logs/, and campaign_status.txt at the repo root always holds a
+# one-line answer to "is it still going, and if not, why did it stop"
+# without having to read the full log.
 #
 # Usage: sudo ./run_everything.sh
 #
 # Each stage aborts the whole run on failure (no point starting a multi-day
 # sweep on top of a broken build) EXCEPT the smoke test, which is a warning,
 # not a hard stop -- see STAGE 3 below for why.
+#
+# Why stage 6 (collection) is a separate script/stage, run again at the very
+# end rather than relying on run.sh's own internal collection: run.sh (stage
+# 4) only collects/builds master tables for whatever labels exist when IT
+# finishes -- the loopback baseline. Stage 5 (the netem sweep) creates
+# dozens/hundreds more labels afterwards; without a second collection pass
+# after it, the entire D7 sweep -- the main reason this repo grew this
+# tooling -- would sit correctly in each project's results/ but never reach
+# global_results/ or get a master comparison table. Found 2026-09-15,
+# auditing the deployment plan for gaps ahead of the real run.
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,8 +49,8 @@ on_error() {
     log "ABORTED at stage: $CURRENT_STAGE"
     echo "See the tail of the log above for the actual error."
     echo "Nothing after this stage ran. Fix the problem, then rerun"
-    echo "./run_everything.sh -- every stage (build, run.sh, the netem sweep)"
-    echo "is safe to rerun: builds are incremental, run.sh/netem resume by"
+    echo "./run_everything.sh -- every stage (build, run.sh, the netem sweep,"
+    echo "collection) is safe to rerun: builds are incremental, run.sh/netem resume by"
     echo "scenario via their own checkpoint files, and pre-existing results"
     echo "are never overwritten (moved aside with a timestamp instead)."
     exit 1
@@ -132,27 +143,32 @@ main() {
     status "RUNNING" "starting"
 
     CURRENT_STAGE="preflight"
-    log "STAGE 1/5: Preflight (install + verify every prerequisite)"
-    status "RUNNING" "stage 1/5: preflight"
+    log "STAGE 1/6: Preflight (install + verify every prerequisite)"
+    status "RUNNING" "stage 1/6: preflight"
     "$ROOT_DIR/preflight.sh"
 
     CURRENT_STAGE="build"
-    log "STAGE 2/5: Build (all 5 projects, both compilers)"
-    status "RUNNING" "stage 2/5: build"
+    log "STAGE 2/6: Build (all 5 projects, both compilers)"
+    status "RUNNING" "stage 2/6: build"
     "$ROOT_DIR/build.sh"
 
-    status "RUNNING" "stage 3/5: smoke test"
+    status "RUNNING" "stage 3/6: smoke test"
     stage_smoke_test
 
     CURRENT_STAGE="baseline campaign (run.sh)"
-    log "STAGE 4/5: Baseline campaign -- every scenario, loopback (RTT=0, no netem)"
-    status "RUNNING" "stage 4/5: baseline campaign (run.sh) -- this is the long one, check campaign_logs/$STAMP/campaign.log for progress"
+    log "STAGE 4/6: Baseline campaign -- every scenario, loopback (RTT=0, no netem)"
+    status "RUNNING" "stage 4/6: baseline campaign (run.sh) -- this is a long one, check campaign_logs/$STAMP/campaign.log for progress"
     "$ROOT_DIR/run.sh"
 
     CURRENT_STAGE="D7 netem sweep (run_rtt_sweep.sh)"
-    log "STAGE 5/5: D7 network-realism sweep -- every scenario x RTT x loss grid (netns+veth)"
-    status "RUNNING" "stage 5/5: D7 netem sweep -- this is the long one, check campaign_logs/$STAMP/campaign.log for progress"
+    log "STAGE 5/6: D7 network-realism sweep -- every scenario x RTT x loss grid (netns+veth)"
+    status "RUNNING" "stage 5/6: D7 netem sweep -- this is the long one, check campaign_logs/$STAMP/campaign.log for progress"
     "$ROOT_DIR/netem/run_rtt_sweep.sh"
+
+    CURRENT_STAGE="collect global results (collect_global_results.sh)"
+    log "STAGE 6/6: Collecting every label (baseline + every D7 grid point) into global_results/"
+    status "RUNNING" "stage 6/6: collecting global results and building master tables"
+    "$ROOT_DIR/collect_global_results.sh"
 
     log "ALL STAGES COMPLETE"
     status "DONE" "finished at $(date '+%Y-%m-%d %H:%M:%S') -- log: $LOG_FILE"

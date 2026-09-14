@@ -57,7 +57,12 @@ ensure_matplotlib() {
     run_privileged apt-get install -y python3-matplotlib
   else
     log "apt-get is not available; trying pip --user"
-    if ! python3 -m pip install --user matplotlib; then
+    # Ubuntu 24.04's system Python is "externally managed" (PEP 668); a
+    # plain `pip install --user` refuses to run at all here, not just warns.
+    # --break-system-packages is the documented override, safe for a --user
+    # install into this one account, not the system site-packages.
+    if ! python3 -m pip install --user matplotlib && \
+       ! python3 -m pip install --user --break-system-packages matplotlib; then
       echo "Error: failed to install matplotlib automatically"
       exit 1
     fi
@@ -96,7 +101,10 @@ ensure_pypdf() {
 
   ensure_pip
 
-  if python3 -m pip install --user pypdf; then
+  # See ensure_matplotlib for why --break-system-packages is tried as a
+  # fallback (PEP 668 on Ubuntu 24.04).
+  if python3 -m pip install --user pypdf || \
+     python3 -m pip install --user --break-system-packages pypdf; then
     log "pypdf installed with pip --user"
     return
   fi

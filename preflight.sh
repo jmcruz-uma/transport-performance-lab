@@ -67,7 +67,14 @@ install_packages() {
     # now rather than discovered as a crash two days into the campaign.
     if ! python3 -c 'import pypdf' >/dev/null 2>&1; then
         if ! apt-get install -y python3-pypdf 2>/dev/null; then
-            python3 -m pip install --user pypdf || {
+            # Ubuntu 24.04's system Python is "externally managed" (PEP 668);
+            # a plain `pip install --user` refuses to run at all here, not
+            # just warns -- confirmed hitting this for real on WSL2 while
+            # testing. --break-system-packages is the documented override,
+            # safe for a --user install into this one account, not the
+            # system site-packages.
+            python3 -m pip install --user pypdf ||
+            python3 -m pip install --user --break-system-packages pypdf || {
                 echo "Error: could not install the 'pypdf' Python module via apt or pip." >&2
                 echo "merge.py (run.sh's final step) needs it; fix this before proceeding." >&2
                 exit 1

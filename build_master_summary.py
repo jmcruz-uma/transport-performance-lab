@@ -778,6 +778,23 @@ def main():
     parser.add_argument("--csv-out", required=True, help="Output CSV file.")
     parser.add_argument("--pdf-out", required=False, help="Optional global PDF comparison report.")
     parser.add_argument("--plots-dir", required=False, help="Optional directory for generated global plots.")
+    parser.add_argument(
+        "--exclude-from-plots",
+        action="append",
+        default=[],
+        metavar="LIBRARY_ID",
+        help=(
+            "library_id to leave out of the PDF's plots/best-of tables only "
+            "(repeatable). The JSON and CSV outputs always include every "
+            "library -- this never discards data, it only keeps one library's "
+            "outlier values from compressing everyone else's axis in a plot. "
+            "E.g. capy-corosio's TLS runtime is a known ~20x+ outlier "
+            "(openssl_stream lacking a compound read/write op; see "
+            "design/tls_experiment_notes.md) -- excluded from tls/tls_framed "
+            "plots for that reason, still fully present in the raw data for "
+            "the separate corosio-upstream report."
+        ),
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.input_dir):
@@ -807,7 +824,17 @@ def main():
         os.makedirs(os.path.dirname(args.pdf_out), exist_ok=True)
         os.makedirs(plots_dir, exist_ok=True)
 
-        generate_global_pdf_report(rows, best_by_case, library_overview, args.pdf_out, plots_dir)
+        plot_rows = rows
+        plot_best_by_case = best_by_case
+        plot_library_overview = library_overview
+        if args.exclude_from_plots:
+            excluded = set(args.exclude_from_plots)
+            plot_rows = [r for r in rows if r.get("library_id") not in excluded]
+            plot_best_by_case = build_best_by_case(plot_rows)
+            plot_library_overview = build_library_overview(plot_rows)
+            print(f"Excluded from plots only (still in JSON/CSV): {sorted(excluded)}")
+
+        generate_global_pdf_report(plot_rows, plot_best_by_case, plot_library_overview, args.pdf_out, plots_dir)
 
         print(f"Global PDF report written to: {args.pdf_out}")
         print(f"Global plots directory written to: {plots_dir}")

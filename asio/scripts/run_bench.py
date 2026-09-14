@@ -184,6 +184,19 @@ REP_COOLDOWN_SECONDS = 3
 SERVER_WAIT_TIMEOUT_SECONDS = 60.0
 SERVER_STOP_TIMEOUT_SECONDS = 5.0
 PORT_RETRY_SPAN = 200
+# Found 2026-09-15 auditing the harness ahead of the real-machine deployment:
+# the bench client wait below used to be an unbounded proc.wait() -- a single
+# hung client (plausible under severe netem loss/RTT, or corosio's documented
+# TLS slowness compounding with it) would silently stall the ENTIRE campaign
+# forever, with nothing left to notice for days. Bounded here instead: a
+# repetition that doesn't finish in time is killed and counted as failed
+# (parse_benchmark_json already treats a missing/invalid output file as
+# `failed`, so this needs no other downstream change), and the campaign moves
+# on. Generous by design -- this must never fire on a legitimately slow but
+# completing transfer (the worst case measured so far, corosio TLS under
+# RTT=10ms/loss=1%, was ~21s) -- override via BENCH_CLIENT_TIMEOUT_SECONDS if
+# a harsher point in the D7 grid ever needs more headroom.
+BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "600"))
 
 # =========================
 # PDF / TABLE TUNING
@@ -714,7 +727,15 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
             outputs.append(out_json)
 
         for proc, _, err_file in processes:
-            proc.wait()
+            try:
+                proc.wait(timeout=BENCH_CLIENT_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                log(
+                    f"WARNING: bench client (pid={proc.pid}) did not finish within "
+                    f"{BENCH_CLIENT_TIMEOUT_SECONDS}s -- killing it and counting this "
+                    f"repetition as failed instead of hanging the whole campaign."
+                )
+                stop_bench_process(proc)
             err_file.close()
     except KeyboardInterrupt:
         for proc, _, err_file in processes:

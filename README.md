@@ -322,7 +322,7 @@ it as many times as needed.
 
 ### What `run_everything.sh` does
 
-Five stages, each logged to `campaign_logs/<timestamp>/campaign.log` and
+Six stages, each logged to `campaign_logs/<timestamp>/campaign.log` and
 summarized in one line in `campaign_status.txt` at the repo root (so checking
 in on a run that's been going for a day is `cat campaign_status.txt`, not
 reading a huge log):
@@ -342,6 +342,24 @@ reading a huge log):
    project, across the full RTT x loss grid (default: 6 RTT points x 4 loss
    points = 24 grid points, netns+veth topology) -- see the "Network-realism
    sweep (D7)" section above for what this measures and why
+6. **collect global results** -- `collect_global_results.sh`: gathers every
+   label produced by stages 4 and 5 into `global_results/` and (re)builds
+   every per-label master table/CSV/PDF -- see "Every result, from every
+   experiment, has the same shape" below. Run again by hand at any time
+   (e.g. mid-campaign) to check progress; always safe, always idempotent.
+   This stage also runs the D2 TLS comparability check (`tls/check_identity.py`)
+   automatically, across every `tls`/`tls_framed` label including every D7
+   netem grid point, and writes it to `global_results/tls_identity_check.txt`
+   -- a mismatch is logged loudly but does not abort the run (nothing else
+   about the campaign is in question, only whether the TLS-family results
+   are cross-arm comparable). No one needs to be at the machine to remember
+   to run this by hand anymore.
+
+The master tables/plots for the `tls`/`tls_framed` labels leave `capy-corosio`
+out of the PDF's plots and best-of tables (its TLS path is a known ~20x+
+outlier -- see `design/tls_experiment_notes.md`) so it doesn't compress every
+other arm's axis. Its data is never discarded: the JSON and CSV always
+include all 4 arms, and every other scenario's plots are unaffected.
 
 Any stage failing aborts the whole run (no point starting a multi-day sweep on
 top of a broken build) and writes the failure -- which stage, and a pointer to
@@ -350,6 +368,13 @@ builds are incremental, `run.sh`/the netem sweep resume by scenario via their
 own checkpoint files, and a pre-existing result is never overwritten (moved
 aside with a timestamp instead) -- so after fixing whatever `preflight.sh` or
 the log pointed at, just run `sudo ./run_everything.sh` again.
+
+A single hung bench client (plausible under severe netem loss/RTT) can no
+longer stall the whole campaign forever either: every repetition is bounded
+by `BENCH_CLIENT_TIMEOUT_SECONDS` (default 600s / 10 minutes -- generous,
+tune it up if a harsher grid point genuinely needs more headroom). A
+repetition that times out is killed and counted as a failed run, not a
+campaign-ending hang.
 
 **Expect this to take a long time.** Stages 4 and 5 are the real campaign:
 every scenario's own case/thread/compiler/repetition grid, multiplied by 24
