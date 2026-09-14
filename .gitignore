@@ -39,3 +39,9 @@ files/*.sha256
 
 __pycache__/
 *.pyc
+
+# run_everything.sh / netem sweep / tune_machine.sh runtime state (per-machine)
+campaign_logs/
+campaign_status.txt
+results_netem/
+.tune_machine_state

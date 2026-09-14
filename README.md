@@ -273,6 +273,11 @@ git clone https://github.com/jmcruz-uma/transport-performance-lab.git
 cd transport-performance-lab
 sudo ./preflight.sh      # ~1-2 minutes: installs + verifies every prerequisite,
                           # fails LOUDLY now instead of silently two days from now
+sudo ./tune_machine.sh apply   # optional but recommended: low-variance,
+                                # RAPL-clean machine tuning -- see the section
+                                # below for what it does and why; skip this
+                                # line if you'd rather measure on a normally
+                                # configured machine
 sudo ./run_everything.sh # the one command: preflight -> build -> smoke test ->
                           # baseline campaign -> D7 netem RTT x loss sweep
 ```
@@ -281,6 +286,12 @@ Do **not** skip running `preflight.sh` on its own first. `run_everything.sh`
 also runs it as its first stage, but running it standalone first means a
 missing dependency is a 2-minute fix you see immediately, not something
 discovered after `run_everything.sh` has already spent time on earlier stages.
+
+`tune_machine.sh apply` belongs **between** `preflight.sh` and
+`run_everything.sh`, run once, by hand -- never automatically, and never
+after the campaign has already started (see the "Machine tuning" section
+below for why it's a separate, deliberate step, and for `tune_machine.sh
+restore` if you ever want the machine back to how it was).
 
 ### What `preflight.sh` checks
 
@@ -346,6 +357,82 @@ grid points for stage 5 alone. Narrow `NETEM_RTTS_MS`/`NETEM_LOSS_PCT`/
 `NETEM_SCENARIOS` (see the D7 section above) before running if a shorter first
 pass is wanted; the defaults assume the machine can be left alone for
 multiple days.
+
+---
+
+## Machine tuning for low-variance, RAPL-clean measurements: `tune_machine.sh`
+
+### Name
+
+```bash
+sudo ./tune_machine.sh apply     # before run_everything.sh
+sudo ./tune_machine.sh status    # read-only, no root needed
+sudo ./tune_machine.sh restore   # undo everything, exactly
+```
+
+### Why it exists, and why it's separate from `run_everything.sh`
+
+A normally-configured machine's CPU frequency scaling, Turbo Boost, and
+hyperthreading all introduce run-to-run variance that is not just noise --
+Mytkowicz et al., *"Producing Wrong Data Without Doing Anything Obviously
+Wrong!"* (ASPLOS 2009), show that innocuous-looking environment differences
+can bias which of two implementations looks faster. For this project that
+risk is doubled: every energy number comes from RAPL, and Turbo Boost/governor
+scaling change *power draw* unpredictably between runs, which contaminates
+energy comparisons between arms even more directly than it contaminates
+timing.
+
+Applying this is a **deliberate methodological choice** (it trades
+"representative of a normally configured machine" for "low-variance,
+comparable across arms"), not something that should happen silently as a side
+effect of running the campaign -- so it is a separate, explicit, one-time step
+you run by hand before `run_everything.sh`, never invoked automatically.
+
+### What it tunes (Tier 1 -- system-wide, no reboot, no changes to any
+### experiment script)
+
+- CPU governor -> `performance` (no frequency scaling between runs)
+- Turbo Boost -> off (the single biggest source of power-draw variance)
+- SMT/hyperthreading -> off (removes sibling-thread cache/execution-unit
+  contention as a noise source)
+- ASLR -> off, NMI watchdog -> off, Transparent Huge Pages -> `never`
+  (standard variance reducers)
+- swap -> off (nothing should ever page during a run)
+- clocksource -> `tsc` if available (highest-resolution, lowest-overhead
+  timekeeping)
+
+**Deliberately out of scope (Tier 2):** CPU isolation (`isolcpus=`/
+`nohz_full=`/`rcu_nocbs=` on the kernel command line) plus pinning the
+server/client processes onto those isolated cores with `taskset`. That would
+directly address the exact mechanism the 2026-09-14 `sched_switch`
+investigation found (see `design/tls_experiment_notes.md` D7 -- a WSL2 pilot
+found a small TAPS-vs-asio delta that traced entirely to a 770-vs-226
+scheduling-event difference), but it needs a reboot (kernel command line) and
+touches `run_bench.py` in all 5 projects (to actually launch under `taskset`),
+so it was deliberately deferred rather than bundled into this pass.
+
+### Every change is verified, not assumed
+
+Each tunable is applied, then **read back** to confirm the value actually
+took effect before this script reports it as `OK` -- a write to a sysfs file
+can silently fail or partially fail (confirmed while testing this script:
+`echo off > .../smt/control` returned a "Device or resource busy" error under
+WSL2, since a hypervisor's virtual CPUs generally can't be hot-unplugged by
+the guest the way SMT-off requires -- the script correctly reports this as
+`FAIL` rather than claiming success; this should not happen on bare-metal
+Ubuntu 24.04, which is the actual target). A tunable that fails to verify is
+reported as `FAIL`, counted, and reflected in the exit code -- `apply`
+finishing without printing any `FAIL` line is what "it worked" actually looks
+like, not just "the script reached the end".
+
+### Restoring is exact, not "sane defaults"
+
+Before changing anything, `apply` snapshots the machine's *actual current*
+value for every tunable it touches (not an assumed default) into
+`.tune_machine_state` at the repo root. `restore` reads that file back and
+puts every value back exactly as found, then deletes the state file. Because
+of this, `apply` refuses to run again on top of an existing state file --
+`restore` first, then `apply` again, if you need to re-run it.
 
 ---
 
@@ -495,7 +582,7 @@ For transport-specific details, the corresponding subproject README should alway
 
 ## Acknowledgements
 
-Special thanks to **Jesús Martínez Cruz** and **José Carlos** for their work on the experimental C++ TAPS implementation and for providing the updated TAPS repository used in this benchmark campaign:
+Special thanks to **Jesús Martínez** and **José Carlos Sequera** for their work on the experimental C++ TAPS implementation and for providing the updated TAPS repository used in this benchmark campaign:
 
 - <https://github.com/jmcruz-uma/taps_cpp/tree/main>
 
@@ -503,6 +590,7 @@ Their contribution made it possible to evaluate TAPS under the same raw TCP file
 
 ---
 
-## Author
+## Authors
 
-**José Antonio García Montañez**
+**José Antonio García-Montañez**
+**Jesús Martínez-Cruz**
