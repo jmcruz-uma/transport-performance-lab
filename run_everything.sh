@@ -114,7 +114,7 @@ smoke_test_project() {
 
 stage_smoke_test() {
     CURRENT_STAGE="smoke test"
-    log "STAGE 3/5: Smoke test (streaming scenario, loopback, one quick real transfer per project)"
+    log "STAGE 3/6: Smoke test (streaming scenario, loopback, one quick real transfer per project)"
     local failures=0
     for project in asio taps-asio async-berkeley bsd-sockets capy-corosio; do
         for compiler in gcc clang; do
