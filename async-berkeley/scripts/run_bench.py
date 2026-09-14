@@ -48,7 +48,20 @@ PORTS = {
 COMPILERS = ["gcc", "clang"]
 
 FILE_TO_SERVE = "../files/100MB.bin"
-HOST = "127.0.0.1"
+# Overridden by the D7 netem/netns sweep (netem/run_rtt_sweep.sh) so the server
+# is reached across the netns+veth link instead of loopback; see netem/netem_common.sh.
+HOST = os.environ.get("NETEM_SERVER_HOST", "127.0.0.1")
+# When set, the server process is launched inside this network namespace
+# (`ip netns exec <NETEM_SERVER_NETNS> ...`) instead of the root namespace.
+NETEM_SERVER_NETNS = os.environ.get("NETEM_SERVER_NETNS", "")
+# Port-freeness probing (can_bind_port/find_free_port/kill_processes_on_port)
+# always happens against the root namespace's own address, never HOST: a
+# freshly-created netns has its own independent, empty port space, so
+# bind-probing it is meaningless -- and literally impossible from the root
+# namespace, since you cannot bind() a foreign namespace's address. Only the
+# real connect target (is_port_open/wait_for_server, and the bench binary's
+# own --server_ip) should ever use HOST.
+PROBE_HOST = "127.0.0.1"
 
 ENERGY_PATH = "/sys/class/powercap/intel-rapl:0/energy_uj"
 MAX_ENERGY_PATH = "/sys/class/powercap/intel-rapl:0/max_energy_range_uj"
@@ -87,6 +100,19 @@ SCENARIO_ENV = {}
 
 def _child_env():
     return {**os.environ, **{k: str(v) for k, v in SCENARIO_ENV.items()}}
+
+
+def _maybe_netns_wrap(cmd):
+    """Prefix `cmd` with `ip netns exec <NETEM_SERVER_NETNS>` when the D7 netem
+    sweep has set that env var (see netem/netem_common.sh); a no-op otherwise.
+    Uses `sudo -n` unless already root -- build.sh installs a NOPASSWD rule
+    scoped to tc/ip precisely so this never has to prompt."""
+    if not NETEM_SERVER_NETNS:
+        return cmd
+    prefix = ["ip", "netns", "exec", NETEM_SERVER_NETNS]
+    if os.geteuid() != 0:
+        prefix = ["sudo", "-n"] + prefix
+    return prefix + cmd
 
 
 def _activate_scenario(name):
@@ -294,7 +320,7 @@ def can_bind_port(host, port):
 
 
 
-def find_free_port(start_port, host=HOST, span=PORT_RETRY_SPAN):
+def find_free_port(start_port, host=PROBE_HOST, span=PORT_RETRY_SPAN):
     for port in range(start_port, start_port + span):
         if can_bind_port(host, port):
             return port
@@ -321,13 +347,13 @@ def kill_processes_on_port(port):
     _run_optional_command(["fuser", "-k", "-TERM", f"{port}/tcp"])
     time.sleep(0.5)
 
-    if can_bind_port(HOST, port):
+    if can_bind_port(PROBE_HOST, port):
         return
 
     _run_optional_command(["fuser", "-k", "-KILL", f"{port}/tcp"])
     time.sleep(0.5)
 
-    if can_bind_port(HOST, port):
+    if can_bind_port(PROBE_HOST, port):
         return
 
     try:
@@ -342,7 +368,7 @@ def kill_processes_on_port(port):
             _run_optional_command(["kill", "-TERM", pid])
         if pids:
             time.sleep(0.5)
-        if not can_bind_port(HOST, port):
+        if not can_bind_port(PROBE_HOST, port):
             for pid in pids:
                 _run_optional_command(["kill", "-KILL", pid])
             if pids:
@@ -356,7 +382,7 @@ def prepare_server_port(compiler):
     preferred = get_port(compiler)
     kill_processes_on_port(preferred)
 
-    if can_bind_port(HOST, preferred):
+    if can_bind_port(PROBE_HOST, preferred):
         return preferred
 
     new_port = find_free_port(preferred + 1)
@@ -379,7 +405,7 @@ def start_server(compiler, server_threads):
     stderr_file = open(stderr_path, "w")
 
     proc = subprocess.Popen(
-        [server_bin, FILE_TO_SERVE, str(port), str(server_threads)],
+        _maybe_netns_wrap([server_bin, FILE_TO_SERVE, str(port), str(server_threads)]),
         stdout=stdout_file,
         stderr=stderr_file,
         env=_child_env(),
@@ -554,6 +580,7 @@ def start_bench_instance(compiler, server_threads, case_clients, repetition, ind
         [bench_bin]
         + BENCH_ARGS
         + [f"--server_port={port}"]
+        + [f"--server_ip={HOST}"]
         + [f"--benchmark_out={output_json}"]
     )
 

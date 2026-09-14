@@ -29,6 +29,7 @@ constexpr int DEFAULT_PORT = 8080;
 constexpr std::size_t BUFFER_SIZE = 65536;
 
 static int g_port = DEFAULT_PORT;
+static std::string g_server_ip = "127.0.0.1";
 
 static int connect_to_server(const std::string& server_ip, int port) {
     const int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -100,7 +101,7 @@ static bool run_benchmark_client(
 }
 
 static void BM_TCP_FileDownload(benchmark::State& state) {
-    const std::string server_ip = "127.0.0.1";
+    const std::string& server_ip = g_server_ip;
     const int port = g_port;
 
     std::array<char, BUFFER_SIZE> buffer{};
@@ -136,15 +137,18 @@ BENCHMARK(BM_TCP_FileDownload)
     ->UseRealTime();
 
 int main(int argc, char** argv) {
-    const std::string prefix = "--server_port=";
+    const std::string port_prefix = "--server_port=";
+    const std::string ip_prefix = "--server_ip=";
 
     int filtered_argc = 1;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
 
-        if (arg.rfind(prefix, 0) == 0) {
-            g_port = std::stoi(arg.substr(prefix.size()));
+        if (arg.rfind(port_prefix, 0) == 0) {
+            g_port = std::stoi(arg.substr(port_prefix.size()));
+        } else if (arg.rfind(ip_prefix, 0) == 0) {
+            g_server_ip = arg.substr(ip_prefix.size());
         } else {
             argv[filtered_argc++] = argv[i];
         }

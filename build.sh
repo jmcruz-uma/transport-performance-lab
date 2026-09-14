@@ -105,6 +105,69 @@ ensure_pypdf() {
   exit 1
 }
 
+ensure_iproute2() {
+  if need_cmd tc; then
+    log "iproute2 (tc) is already available"
+  else
+    log "Installing iproute2 (provides tc, needed by the netem D7 RTT sweep)..."
+    if need_cmd apt-get; then
+      run_privileged apt-get update
+      run_privileged apt-get install -y iproute2
+    else
+      echo "Error: 'tc' is not available and apt-get is not present to install it"
+      exit 1
+    fi
+  fi
+
+  # sch_netem is often a loadable module (and sometimes built into the kernel,
+  # in which case modprobe correctly no-ops with "module already builtin").
+  # Best-effort: the netem sweep script re-checks this itself before shaping,
+  # so a failure here does not abort the whole build.
+  run_privileged modprobe sch_netem 2>/dev/null || true
+}
+
+ensure_netem_nopasswd_sudo() {
+  if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    log "Running as root: no separate sudo rule needed for tc/ip"
+    return
+  fi
+
+  if ! need_cmd tc || ! need_cmd ip; then
+    log "tc/ip not available yet; skipping the netem sudo rule"
+    return
+  fi
+
+  local tc_path ip_path sudoers_file target_user
+  tc_path="$(command -v tc)"
+  ip_path="$(command -v ip)"
+  sudoers_file="/etc/sudoers.d/tc-netem"
+  target_user="${SUDO_USER:-$(id -un)}"
+
+  if sudo -n "$tc_path" qdisc show dev lo >/dev/null 2>&1 && \
+     sudo -n "$ip_path" netns list >/dev/null 2>&1; then
+    log "Passwordless sudo for tc and ip is already working"
+    return
+  fi
+
+  log "Installing a NOPASSWD sudo rule scoped to '$tc_path' and '$ip_path' for user '$target_user'" \
+      "(so the netem D7 netns+veth RTT/loss sweep can manage the topology and qdiscs without prompting)"
+
+  local rule="$target_user ALL=(ALL) NOPASSWD: $tc_path, $ip_path"
+  if ! echo "$rule" | run_privileged tee "$sudoers_file" >/dev/null; then
+    echo "Error: failed to write $sudoers_file"
+    exit 1
+  fi
+  run_privileged chmod 0440 "$sudoers_file"
+
+  if ! run_privileged visudo -c >/dev/null 2>&1; then
+    echo "Error: $sudoers_file failed sudoers syntax validation; removing it"
+    run_privileged rm -f "$sudoers_file"
+    exit 1
+  fi
+
+  log "tc/ip sudo rule installed and validated"
+}
+
 setup_tls_assets() {
   log "Preparing shared TLS assets (certificates + deterministic payload + framed manifest)"
   chmod +x "$ROOT_DIR/tls/gen_certs.sh" "$ROOT_DIR/tls/gen_payload.sh"
@@ -143,6 +206,8 @@ main() {
   ensure_basic_tools
   ensure_matplotlib
   ensure_pypdf
+  ensure_iproute2
+  ensure_netem_nopasswd_sudo
   setup_tls_assets
 
   for project_dir in "${PROJECT_DIRS[@]}"; do

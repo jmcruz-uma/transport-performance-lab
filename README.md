@@ -151,6 +151,99 @@ This means the detailed benchmark behavior still belongs to each individual subp
 
 ---
 
+## Network-realism sweep (D7): `netem/run_rtt_sweep.sh`
+
+### Name
+
+```bash
+./netem/run_rtt_sweep.sh
+```
+
+(`sudo` is not required as a prefix if `./build.sh` has already been run at least
+once — it installs a NOPASSWD sudo rule scoped specifically to the `tc` binary, via
+`/etc/sudoers.d/tc-netem`. Running it under `sudo` directly also works, same as
+`build.sh`/`run.sh`.)
+
+### Why it exists
+
+Every other campaign above measures over loopback, with no simulated network
+latency or loss. That is not just an incompleteness: a real debugging session
+(2026-09-14, see `design/tls_experiment_notes.md` D7) found a small TLS-scenario
+timing delta between two implementations at RTT=0 that **reversed sign** once
+~1.7 ms of round-trip latency was simulated. A loopback-only number would have
+reported that artifact as if it were the actual finding. This script exists so
+that check is a one-command rerun, not a from-scratch investigation, whenever a
+loopback-only result looks surprising -- and, more generally, so every scenario
+(not just TLS) can be measured under realistic RTT and packet loss, answering
+reviewer R2-c's "loopback-only is not representative" for the whole benchmark
+matrix, not one corner of it.
+
+### What it does
+
+Client and server traffic is carried over a Linux network namespace + veth pair
+(not shaped directly on `lo`): the server runs inside a dedicated namespace, the
+client (and the rest of this harness) stays in the root namespace and connects to
+the namespace's veth IP. This gives each direction its own genuinely separate
+interface/queue, rather than sharing loopback's single egress queue.
+
+Once, at the start: the netns+veth topology is created (idempotent -- safe to
+rerun after a crash). Then, for each (RTT, loss) point in the
+`NETEM_RTTS_MS` x `NETEM_LOSS_PCT` grid:
+
+1. shapes both veth endpoints with `tc qdisc ... netem delay ... rate ... loss
+   gemodel ...` to the target RTT and average loss rate (a bandwidth cap is
+   always paired with the delay -- without one, the link's unbounded bandwidth
+   overflows netem's queue on a bulk transfer and produces real TCP
+   retransmission stalls, not a clean latency simulation; loss uses the Simple
+   Gilbert two-state model -- bursty, not independent-per-packet -- parameterised
+   by target average loss rate and mean burst length in packets, see
+   `netem_common.sh` for the derivation and citations)
+2. verifies the RTT shaping actually took effect with `ping` across the veth
+   link, aborting that point rather than silently recording a mislabelled result
+3. runs `NETEM_SCENARIOS` for each project in `NETEM_PROJECTS`, via each
+   project's own `scripts/run_bench.py` (`RUN_SCENARIOS` is how scenario
+   selection already works everywhere else in this repo); `NETEM_SERVER_HOST`/
+   `NETEM_SERVER_NETNS`, exported by `netem_common.sh`, tell each `run_bench.py`
+   to launch the server inside the namespace and point the client at its veth IP
+4. moves each project's `results/<scenario>/` into
+   `results/<scenario>__netem_rtt_<R>ms_loss_<L>pct/` -- a pre-existing
+   (non-netem) `results/<scenario>` is always moved aside with a timestamp
+   first, never overwritten or deleted
+
+Once, at the end (also on any error/interrupt, via a trap -- an interrupted sweep
+never leaves the namespace or a qdisc behind): the topology is torn down.
+
+### Configuration
+
+```bash
+NETEM_RTTS_MS="0 1 5 10 20 50"       # target RTTs in ms (default shown)
+NETEM_LOSS_PCT="0 0.1 1 5"           # target average loss rates in % (default shown)
+NETEM_MEAN_BURST_PKTS=3              # Simple Gilbert: mean consecutive packets per loss event
+NETEM_SCENARIOS="streaming whole_object blocks tls tls_framed udp_k64 udp_k1400"  # default: every scenario
+NETEM_PROJECTS="asio taps-asio async-berkeley bsd-sockets capy-corosio"
+NETEM_RATE_MBIT=1000                 # bandwidth cap paired with the delay
+NETEM_LIMIT_PKTS=50000               # netem queue depth
+NETEM_RTT_TOLERANCE_MS=2             # how far measured RTT may drift from target
+DRY_RUN=1                            # print the plan, touch no qdisc/netns, run nothing
+```
+
+Typical usage:
+
+```bash
+./netem/run_rtt_sweep.sh
+NETEM_RTTS_MS="0 1 10" NETEM_LOSS_PCT="0 1" NETEM_SCENARIOS="tls" ./netem/run_rtt_sweep.sh
+```
+
+Per-point TCP environment snapshots (congestion control, `tcp_rmem`/`tcp_wmem`,
+offload flags) are written to
+`results_netem/tcp_env_rtt_<R>ms_loss_<L>pct.txt`.
+
+The default grid is the full scenario matrix x 6 RTT points x 4 loss points (24
+grid points); this multiplies total campaign runtime accordingly. Narrow
+`NETEM_SCENARIOS`/`NETEM_RTTS_MS`/`NETEM_LOSS_PCT` to iterate faster.
+
+---
+
 ## Recommended workflow
 
 From repository root:
