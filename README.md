@@ -263,6 +263,92 @@ With this workflow:
 
 ---
 
+## Setting up a fresh measurement machine, unattended
+
+For a clean Ubuntu 24.04 machine that will run the full campaign (baseline +
+D7 netem sweep) unattended while nobody is watching it:
+
+```bash
+git clone https://github.com/jmcruz-uma/transport-performance-lab.git
+cd transport-performance-lab
+sudo ./preflight.sh      # ~1-2 minutes: installs + verifies every prerequisite,
+                          # fails LOUDLY now instead of silently two days from now
+sudo ./run_everything.sh # the one command: preflight -> build -> smoke test ->
+                          # baseline campaign -> D7 netem RTT x loss sweep
+```
+
+Do **not** skip running `preflight.sh` on its own first. `run_everything.sh`
+also runs it as its first stage, but running it standalone first means a
+missing dependency is a 2-minute fix you see immediately, not something
+discovered after `run_everything.sh` has already spent time on earlier stages.
+
+### What `preflight.sh` checks
+
+Installs (via `apt-get`, idempotent) and then verifies -- not just "is the
+package installed" but "does the capability actually work":
+
+- compilers: `gcc-14`/`g++-14`, `clang-18` (and that the bare `clang`/`clang++`
+  commands resolve to the -18 toolchain, since every `build_release.sh` calls
+  them by that name), `libc++-18-dev`/`libc++abi-18-dev`
+- `libssl-dev` (every TLS/TLS-framed scenario needs it)
+- `cmake` >= 3.20
+- network namespaces + veth pairs + the `sch_netem` qdisc actually work
+  (creates and tears down a throwaway test namespace -- this is what D7 needs)
+- **RAPL is readable** (`/sys/class/powercap/intel-rapl:0/energy_uj`) -- this
+  is the entire reason to run on real hardware instead of WSL2/a VM; every
+  energy number in the campaign depends on it, so this check exists to fail
+  loudly *before* a multi-day run rather than silently produce zeros
+- network access to GitHub (every project `FetchContent`s its dependencies
+  from there: standalone Asio, Google Benchmark, corosio, capy, taps_cpp)
+- free disk space (15+ GiB recommended: 2 compilers x 5 projects x fetched
+  sources, plus days of accumulated results/plots/PDFs)
+- the Python modules the reporting pipeline needs (`matplotlib`, `pypdf`)
+
+If anything fails, `preflight.sh` prints every failure at once (not just the
+first one) with what's wrong and, where applicable, how to fix it, then exits
+non-zero. Fix everything it reports before moving on. It's idempotent -- rerun
+it as many times as needed.
+
+### What `run_everything.sh` does
+
+Five stages, each logged to `campaign_logs/<timestamp>/campaign.log` and
+summarized in one line in `campaign_status.txt` at the repo root (so checking
+in on a run that's been going for a day is `cat campaign_status.txt`, not
+reading a huge log):
+
+1. **preflight** -- reruns `preflight.sh`; aborts immediately if it fails
+2. **build** -- `build.sh` (all 5 projects, both compilers)
+3. **smoke test** -- one real transfer per project/compiler over loopback
+   (the `streaming` scenario, no certs needed) as a fast sanity check that
+   what was just built actually runs correctly, not just compiles. A failure
+   here is logged prominently as a warning but does not stop the run -- by
+   design, so a single flaky smoke-test iteration never throws away hours of
+   otherwise-good build/campaign work; read the log if you see one
+4. **baseline campaign** -- `run.sh`: every scenario, every project, loopback
+   only (RTT=0, no netem) -- this is the "everything measured the way it
+   always has been" pass
+5. **D7 netem sweep** -- `netem/run_rtt_sweep.sh`: every scenario, every
+   project, across the full RTT x loss grid (default: 6 RTT points x 4 loss
+   points = 24 grid points, netns+veth topology) -- see the "Network-realism
+   sweep (D7)" section above for what this measures and why
+
+Any stage failing aborts the whole run (no point starting a multi-day sweep on
+top of a broken build) and writes the failure -- which stage, and a pointer to
+the full log -- to `campaign_status.txt`. Every stage is safe to rerun:
+builds are incremental, `run.sh`/the netem sweep resume by scenario via their
+own checkpoint files, and a pre-existing result is never overwritten (moved
+aside with a timestamp instead) -- so after fixing whatever `preflight.sh` or
+the log pointed at, just run `sudo ./run_everything.sh` again.
+
+**Expect this to take a long time.** Stages 4 and 5 are the real campaign:
+every scenario's own case/thread/compiler/repetition grid, multiplied by 24
+grid points for stage 5 alone. Narrow `NETEM_RTTS_MS`/`NETEM_LOSS_PCT`/
+`NETEM_SCENARIOS` (see the D7 section above) before running if a shorter first
+pass is wanted; the defaults assume the machine can be left alone for
+multiple days.
+
+---
+
 ## Global results layout
 
 The current root-level automation is intended to store consolidated outputs under a structure like:
