@@ -436,65 +436,115 @@ of this, `apply` refuses to run again on top of an existing state file --
 
 ---
 
-## Global results layout
+## Every result, from every experiment, has the same shape
 
-The current root-level automation is intended to store consolidated outputs under a structure like:
+Every scenario -- `streaming`/`whole_object`/`blocks`/`tls`/`tls_framed`/
+`udp_k64`/`udp_k1400`, under plain loopback (`run.sh`) or under any point of
+the D7 netem RTT x loss grid (`netem/run_rtt_sweep.sh`) -- is produced by the
+exact same code path in each project's `scripts/run_bench.py`. The netem
+sweep changes *where the server and client connect* (a namespace's veth IP
+instead of `127.0.0.1`) and *what `RUN_SCENARIOS`/env it's invoked with*; it
+never touches the stats-computation or file-writing code. **The result files
+are byte-for-byte the same schema whether you're looking at a loopback
+baseline or an RTT=20ms/loss=1% netem grid point** -- only *where* they end
+up on disk differs (see below). Nothing about interpreting one is different
+from interpreting the other.
+
+### What each per-(project, scenario) run produces, under `<project>/results/<label>/`
+
+(`<label>` is the plain scenario name for a `run.sh` baseline, e.g.
+`streaming`, or `<scenario>__netem_rtt_<R>ms_loss_<L>pct` for a D7 grid
+point, e.g. `tls__netem_rtt_20ms_loss_1pct`.)
+
+- `raw/micro_<compiler>_threads_<N>_<case>_<rep>.json` -- one file per
+  individual repetition (Google Benchmark's raw output for that single run)
+- `raw/macro_bench_results.json` -- every repetition of every
+  (compiler, server_threads, case) combination in the scenario's grid,
+  concatenated
+- `raw/macro_bench_summary.json` -- the one to read first. Per (compiler,
+  server_threads, `parallel_bench_processes` = concurrency case), summary
+  statistics (`count`/`mean`/`median`/`stdev`/`min`/`max`/`p25`/`p50`/`p95`)
+  over all repetitions of:
+  - `elapsed_s` / `elapsed_ms` -- wall-clock time of the transfer
+  - `energy_j_raw` -- raw RAPL energy delta over the transfer (0 on any
+    machine without RAPL, e.g. WSL2 -- if you see all-zero energy after
+    deploying, that is the tell that RAPL isn't being read, check
+    `preflight.sh`'s RAPL check again)
+  - `idle_energy_j_estimated` -- what the same elapsed time would have cost
+    at the machine's measured idle power draw (see `measure_idle_energy.py`,
+    `idle_baseline.json`)
+  - `energy_j` -- the energy actually attributable to the transfer
+    (`energy_j_raw` minus the idle estimate)
+  - `throughput_mib_s`, `downloads_per_process`, `total_iterations`
+  - `success` / `failed` counts
+- `raw/macro_bench_results.csv` -- the same data as the results JSON, flattened to CSV
+- `reports/macro_bench_report_{with,no}_raw.pdf`,
+  `macro_bench_comparison_report_{with,no}_raw.pdf` -- per-project PDF
+  reports for that one scenario/grid-point
+- `plots/`, `logs/`, `checkpoints/` -- generated plots, server/bench stderr
+  logs, and the `scenario_done.json` checkpoint that makes a scenario
+  resumable/skippable on rerun
+
+### Where the global (cross-library) view collects all of this
+
+`run.sh` walks every `<project>/results/<label>/` directory it finds (there
+had been a **real, since-fixed bug here**: the collection step used to look
+for a single flat `results/raw/...` path that `run_bench.py` has never
+actually written to -- every project always writes per-`<label>`, so the
+global collection step silently found nothing from any real multi-scenario
+campaign until this was caught and fixed on 2026-09-15, ahead of the
+real-machine deployment) and mirrors everything under `global_results/`,
+organized by `<label>` so results from different scenarios/grid-points are
+never mixed together:
 
 ```text
 global_results/
-├── raw/
-├── summaries/
-├── csv/
+├── raw/<label>/<project>_raw.json
+├── summaries/<label>/<project>_summary.json
+├── summaries/master_summary__<label>.json      <- one master table PER label
+├── csv/<label>/<project>_raw.csv
+├── csv/master_summary__<label>.csv             <- one master CSV PER label
 ├── reports/
-│   ├── main_with_raw/
-│   ├── main_without_raw/
-│   ├── comparison_with_raw/
-│   ├── comparison_without_raw/
-│   ├── per_library/
-│   └── merged/
-├── plots/
-├── per_project/
+│   ├── main_with_raw/<label>/, main_without_raw/<label>/,
+│   │   comparison_with_raw/<label>/, comparison_without_raw/<label>/,
+│   │   per_library/<label>/               <- per-project PDFs, by label
+│   ├── global/master__<label>.pdf         <- one master PDF PER label
+│   └── merged/                             <- see "Merged global reports" below
+├── plots/<label>/<project>/, plots/global/<label>/
+├── per_project/<project>/<label>/          <- full detail, mirrors the project's own results/<label>/
 ├── logs/
 └── manifests/
 ```
 
-### Meaning of the main folders
+**Why per-label, not one giant global table:** the master table groups rows
+by (compiler, server_threads, concurrency case) and finds the fastest/
+lowest-energy/highest-throughput row per group -- that comparison is only
+meaningful between rows measuring the *same condition*. Mixing e.g. `asio`
+under `streaming`/RTT=0 with `taps-asio` under `tls`/RTT=20ms/loss=1% into
+one table would silently compare two different experiments as if they were
+peers. One master table per `<label>` keeps every comparison apples-to-apples
+while still collecting every single result -- nothing from any scenario or
+grid point is dropped.
 
-- `raw/`: collected raw JSON data from all subprojects
-- `summaries/`: collected per-library summary JSON files plus the global master summary
-- `csv/`: collected per-library CSV files plus the global master CSV
-- `reports/`: categorized PDF reports produced by each transport implementation
-- `plots/`: copied plot outputs from individual projects when available
-- `per_project/`: a clean per-library mirror of collected outputs
-- `logs/`: global orchestration logs
-- `manifests/`: run configuration and execution metadata
+With the default D7 grid (6 RTT points x 4 loss points = 24, times 7
+scenarios) plus the loopback baseline, expect on the order of 170+ labels
+(fewer in practice: `async-berkeley` has no TLS scenarios, and some
+combinations may be narrowed via `NETEM_SCENARIOS`/`NETEM_RTTS_MS`/
+`NETEM_LOSS_PCT`). Each `master_summary__<label>.json`/`.csv`/PDF is the
+starting point for comparing the 5 libraries under that one condition;
+comparing *across* labels (e.g. "how does asio's `tls` delta from `streaming`
+change as RTT grows") means reading multiple label files together -- there
+is no single "does everything" master file, by design (see above).
 
-This structure is meant to make the full campaign easier to inspect globally, while still preserving per-project separation.
+### Master table columns
 
----
-
-## Global master summary
-
-After the full execution, the repository-level workflow can generate a consolidated master table from the collected `*_summary.json` files.
-
-Typical outputs:
-
-- `global_results/summaries/master_summary.json`
-- `global_results/csv/master_summary.csv`
-
-These master files are intended to support comparison across:
-
-- libraries
-- compilers
-- server thread counts
-- numbers of parallel benchmark clients
-
-They can also be extended to derive higher-level metrics such as:
-
-- throughput per joule
-- best library per case
-- average behavior by library
-- per-case winners for latency, energy, throughput, or efficiency
+Each row in a `master_summary__<label>.json`/`.csv` is one
+(library, compiler, server_threads, concurrency case), with every
+`macro_bench_summary.json` stat flattened into columns
+(`elapsed_ms_mean`, `elapsed_ms_p95`, `energy_j_mean`, `throughput_mib_s_mean`,
+...) plus two derived columns: `throughput_per_joule_mean/median` and
+`downloads_per_second_mean`. The accompanying PDF plots the same comparisons
+graphically per case.
 
 ---
 

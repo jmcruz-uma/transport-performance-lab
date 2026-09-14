@@ -22,10 +22,6 @@ PER_PROJECT_DIR="$GLOBAL_RESULTS_DIR/per_project"
 LOGS_DIR="$GLOBAL_RESULTS_DIR/logs"
 MANIFESTS_DIR="$GLOBAL_RESULTS_DIR/manifests"
 
-MASTER_JSON="$SUMMARIES_DIR/master_summary.json"
-MASTER_CSV="$CSV_DIR/master_summary.csv"
-MASTER_PDF="$GLOBAL_REPORTS_DIR/global_master_comparison_report.pdf"
-
 SYSTEM_INFO_TXT="$GLOBAL_RESULTS_DIR/system_info.txt"
 RUN_LOG="$LOGS_DIR/run_log.txt"
 RUN_MANIFEST_JSON="$MANIFESTS_DIR/run_manifest.json"
@@ -97,9 +93,9 @@ save_manifest() {
   "per_project_dir": "$PER_PROJECT_DIR",
   "logs_dir": "$LOGS_DIR",
   "manifests_dir": "$MANIFESTS_DIR",
-  "master_json": "$MASTER_JSON",
-  "master_csv": "$MASTER_CSV",
-  "master_pdf": "$MASTER_PDF",
+  "master_json_pattern": "$SUMMARIES_DIR/<label>/master_summary__<label>.json",
+  "master_csv_pattern": "$CSV_DIR/master_summary__<label>.csv",
+  "master_pdf_pattern": "$GLOBAL_REPORTS_DIR/master__<label>.pdf",
   "system_info_txt": "$SYSTEM_INFO_TXT",
   "run_log": "$RUN_LOG",
   "settle_seconds_before": $SETTLE_SECONDS_BEFORE,
@@ -215,86 +211,144 @@ copy_if_exists() {
 }
 
 copy_project_artifacts_if_exist() {
+  # run_bench.py has ALWAYS written per-scenario, at results/<scenario>/... --
+  # never at the flat results/... this function used to look at (see
+  # bench_scenarios.py's _activate_scenario: RESULTS_DIR = ./results/<name>).
+  # That meant global_results/ silently collected nothing from any real
+  # multi-scenario campaign -- found 2026-09-15 while reviewing this ahead of
+  # the real-machine deployment, well before it, not after. Fixed by iterating
+  # every results/<label>/ subdirectory a project has (a plain scenario name
+  # like "streaming", or a netem-swept one like
+  # "tls__netem_rtt_10ms_loss_1pct" from netem/run_rtt_sweep.sh) instead of
+  # assuming there is exactly one.
+  #
+  # Collected under a per-LABEL subdirectory (not flattened with the project
+  # name in the filename) specifically so build_master_tables() can point
+  # build_master_summary.py at one label's summaries and get a clean,
+  # apples-to-apples comparison of the 5 libraries under that one condition --
+  # mixing scenarios/netem-points into one global table would silently
+  # compare e.g. asio-streaming-loopback against
+  # taps-asio-tls-under-10ms-RTT-1pct-loss as if they were peers, which is
+  # not a valid comparison.
   local project_dir="$1"
-  local results_dir="$ROOT_DIR/$project_dir/results"
-  local project_out_dir="$PER_PROJECT_DIR/$project_dir"
+  local project_results_root="$ROOT_DIR/$project_dir/results"
 
-  mkdir -p \
-    "$project_out_dir/raw" \
-    "$project_out_dir/summaries" \
-    "$project_out_dir/csv" \
-    "$project_out_dir/reports" \
-    "$project_out_dir/plots"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_results.json" \
-    "$project_out_dir/raw/macro_bench_results.json"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_summary.json" \
-    "$project_out_dir/summaries/macro_bench_summary.json"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_results.csv" \
-    "$project_out_dir/csv/macro_bench_results.csv"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_results.json" \
-    "$RAW_DIR/${project_dir}_raw.json"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_summary.json" \
-    "$SUMMARIES_DIR/${project_dir}_summary.json"
-
-  copy_if_exists \
-    "$results_dir/raw/macro_bench_results.csv" \
-    "$CSV_DIR/${project_dir}_raw.csv"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_report_with_raw.pdf" \
-    "$project_out_dir/reports/macro_bench_report_with_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_report_no_raw.pdf" \
-    "$project_out_dir/reports/macro_bench_report_no_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_comparison_report_with_raw.pdf" \
-    "$project_out_dir/reports/macro_bench_comparison_report_with_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_comparison_report_no_raw.pdf" \
-    "$project_out_dir/reports/macro_bench_comparison_report_no_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_report_with_raw.pdf" \
-    "$REPORTS_MAIN_WITH_RAW_DIR/${project_dir}_main_with_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_report_no_raw.pdf" \
-    "$REPORTS_MAIN_WITHOUT_RAW_DIR/${project_dir}_main_without_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_comparison_report_with_raw.pdf" \
-    "$REPORTS_COMPARISON_WITH_RAW_DIR/${project_dir}_comparison_with_raw.pdf"
-
-  copy_if_exists \
-    "$results_dir/reports/macro_bench_comparison_report_no_raw.pdf" \
-    "$REPORTS_COMPARISON_WITHOUT_RAW_DIR/${project_dir}_comparison_without_raw.pdf"
-
-  if [ -d "$results_dir/reports" ]; then
-    find "$results_dir/reports" -maxdepth 1 -type f -name "*.pdf" | while read -r pdf; do
-      local name
-      name="$(basename "$pdf")"
-      copy_if_exists "$pdf" "$REPORTS_PER_LIBRARY_DIR/${project_dir}_${name}"
-    done
+  if [ ! -d "$project_results_root" ]; then
+    return
   fi
 
-  if [ -d "$results_dir/plots" ]; then
-    mkdir -p "$PLOTS_DIR/$project_dir"
-    cp -r "$results_dir/plots/." "$PLOTS_DIR/$project_dir/" 2>/dev/null || true
-    cp -r "$results_dir/plots/." "$project_out_dir/plots/" 2>/dev/null || true
-    log "Copied plots for $project_dir"
+  local found_any=0
+  local label_path
+  for label_path in "$project_results_root"/*/; do
+    [ -d "$label_path" ] || continue
+    local label
+    label="$(basename "${label_path%/}")"
+
+    # Never collect the netem sweep's own safety-stash directories (see
+    # netem/run_rtt_sweep.sh: stash_preexisting_results / relocate_results) --
+    # those are deliberately-preserved leftovers, not this run's results.
+    case "$label" in
+      *__preexisting_backup_*|*__superseded_*) continue ;;
+    esac
+
+    found_any=1
+    local results_dir="${label_path%/}"
+    local project_out_dir="$PER_PROJECT_DIR/$project_dir/$label"
+
+    mkdir -p \
+      "$project_out_dir/raw" \
+      "$project_out_dir/summaries" \
+      "$project_out_dir/csv" \
+      "$project_out_dir/reports" \
+      "$project_out_dir/plots" \
+      "$RAW_DIR/$label" \
+      "$SUMMARIES_DIR/$label" \
+      "$CSV_DIR/$label" \
+      "$REPORTS_MAIN_WITH_RAW_DIR/$label" \
+      "$REPORTS_MAIN_WITHOUT_RAW_DIR/$label" \
+      "$REPORTS_COMPARISON_WITH_RAW_DIR/$label" \
+      "$REPORTS_COMPARISON_WITHOUT_RAW_DIR/$label" \
+      "$REPORTS_PER_LIBRARY_DIR/$label"
+
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_results.json" \
+      "$project_out_dir/raw/macro_bench_results.json"
+
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_summary.json" \
+      "$project_out_dir/summaries/macro_bench_summary.json"
+
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_results.csv" \
+      "$project_out_dir/csv/macro_bench_results.csv"
+
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_results.json" \
+      "$RAW_DIR/$label/${project_dir}_raw.json"
+
+    # Filename here (not $label) is what build_master_summary.py's
+    # infer_library_name() turns into the "library" -- keeping it as the
+    # plain project name is what makes it match LIBRARY_ORDER/
+    # LIBRARY_DISPLAY_NAMES/LIBRARY_COLORS for proper styling in the report.
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_summary.json" \
+      "$SUMMARIES_DIR/$label/${project_dir}_summary.json"
+
+    copy_if_exists \
+      "$results_dir/raw/macro_bench_results.csv" \
+      "$CSV_DIR/$label/${project_dir}_raw.csv"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_report_with_raw.pdf" \
+      "$project_out_dir/reports/macro_bench_report_with_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_report_no_raw.pdf" \
+      "$project_out_dir/reports/macro_bench_report_no_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_comparison_report_with_raw.pdf" \
+      "$project_out_dir/reports/macro_bench_comparison_report_with_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_comparison_report_no_raw.pdf" \
+      "$project_out_dir/reports/macro_bench_comparison_report_no_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_report_with_raw.pdf" \
+      "$REPORTS_MAIN_WITH_RAW_DIR/$label/${project_dir}_main_with_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_report_no_raw.pdf" \
+      "$REPORTS_MAIN_WITHOUT_RAW_DIR/$label/${project_dir}_main_without_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_comparison_report_with_raw.pdf" \
+      "$REPORTS_COMPARISON_WITH_RAW_DIR/$label/${project_dir}_comparison_with_raw.pdf"
+
+    copy_if_exists \
+      "$results_dir/reports/macro_bench_comparison_report_no_raw.pdf" \
+      "$REPORTS_COMPARISON_WITHOUT_RAW_DIR/$label/${project_dir}_comparison_without_raw.pdf"
+
+    if [ -d "$results_dir/reports" ]; then
+      find "$results_dir/reports" -maxdepth 1 -type f -name "*.pdf" | while read -r pdf; do
+        local name
+        name="$(basename "$pdf")"
+        copy_if_exists "$pdf" "$REPORTS_PER_LIBRARY_DIR/$label/${project_dir}_${name}"
+      done
+    fi
+
+    if [ -d "$results_dir/plots" ]; then
+      mkdir -p "$PLOTS_DIR/$label/$project_dir"
+      cp -r "$results_dir/plots/." "$PLOTS_DIR/$label/$project_dir/" 2>/dev/null || true
+      cp -r "$results_dir/plots/." "$project_out_dir/plots/" 2>/dev/null || true
+    fi
+
+    log "Copied artifacts for $project_dir / $label"
+  done
+
+  if [ "$found_any" -eq 0 ]; then
+    log "No results/<scenario> subdirectories found for $project_dir -- nothing to collect"
   fi
 }
 
@@ -363,13 +417,29 @@ build_master_tables() {
     return
   fi
 
-  log "Generating global comparison tables and PDF report..."
-  python3 "$script" \
-    --input-dir "$SUMMARIES_DIR" \
-    --json-out "$MASTER_JSON" \
-    --csv-out "$MASTER_CSV" \
-    --pdf-out "$MASTER_PDF" \
-    --plots-dir "$GLOBAL_PLOTS_DIR"
+  if [ ! -d "$SUMMARIES_DIR" ] || [ -z "$(find "$SUMMARIES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
+    log "No per-label summaries collected yet; skipping master table generation"
+    return
+  fi
+
+  # One master table/PDF per label (scenario, or scenario+netem-point) --
+  # see copy_project_artifacts_if_exist for why these must not be merged
+  # into a single cross-scenario table.
+  local label_dir label
+  for label_dir in "$SUMMARIES_DIR"/*/; do
+    [ -d "$label_dir" ] || continue
+    label="$(basename "${label_dir%/}")"
+    log "Generating comparison table and PDF report for: $label"
+    mkdir -p "$GLOBAL_PLOTS_DIR/$label"
+    python3 "$script" \
+      --input-dir "${label_dir%/}" \
+      --json-out "$SUMMARIES_DIR/master_summary__${label}.json" \
+      --csv-out "$CSV_DIR/master_summary__${label}.csv" \
+      --pdf-out "$GLOBAL_REPORTS_DIR/master__${label}.pdf" \
+      --plots-dir "$GLOBAL_PLOTS_DIR/$label"
+  done
+
+  log "Master tables written under $SUMMARIES_DIR/master_summary__<label>.json (+ .csv, + PDF under $GLOBAL_REPORTS_DIR)"
 }
 
 merge_reports() {
@@ -427,9 +497,9 @@ main() {
   merge_reports
 
   log "Global execution finished"
-  log "Master JSON: $MASTER_JSON"
-  log "Master CSV: $MASTER_CSV"
-  log "Master PDF: $MASTER_PDF"
+  log "Master tables (one per scenario/netem-point label): $SUMMARIES_DIR/master_summary__<label>.json"
+  log "Master CSVs: $CSV_DIR/master_summary__<label>.csv"
+  log "Master PDFs: $GLOBAL_REPORTS_DIR/master__<label>.pdf"
   log "Merged reports directory: $MERGED_REPORTS_DIR"
 }
 

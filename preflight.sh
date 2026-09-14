@@ -57,9 +57,23 @@ install_packages() {
     )
     apt-get install -y "${packages[@]}"
 
-    # pypdf is not always packaged; build.sh already falls back to pip for it,
-    # so this is best-effort only, not a hard requirement here.
-    apt-get install -y python3-pypdf 2>/dev/null || true
+    # pypdf is what merge.py (run.sh's last step, after a potentially
+    # multi-day campaign) needs to merge PDF reports; run.sh has `set -e`, so
+    # a missing pypdf there means an unhandled Python traceback aborting the
+    # run right at the finish line. Confirmed on Ubuntu 24.04 (noble):
+    # python3-pypdf 4.0.2-1 is a real package in the standard archive, so
+    # this should always succeed here -- but mirror build.sh's apt-then-pip
+    # fallback anyway, and treat total failure as fatal, so this is caught
+    # now rather than discovered as a crash two days into the campaign.
+    if ! python3 -c 'import pypdf' >/dev/null 2>&1; then
+        if ! apt-get install -y python3-pypdf 2>/dev/null; then
+            python3 -m pip install --user pypdf || {
+                echo "Error: could not install the 'pypdf' Python module via apt or pip." >&2
+                echo "merge.py (run.sh's final step) needs it; fix this before proceeding." >&2
+                exit 1
+            }
+        fi
+    fi
 
     modprobe sch_netem 2>/dev/null || true
 }
