@@ -212,10 +212,15 @@ check_netem_netns() {
     fi
     ip netns del __preflight_test 2>/dev/null
 
-    if ! ip link add __preflight_veth0 type veth peer name __preflight_veth1 2>/dev/null; then
+    # Interface names are capped at IFNAMSIZ (15 chars + NUL) by the kernel;
+    # __preflight_veth0/1 (17 chars) silently fails 'ip link add' with that
+    # limit exceeded -- found for real 2026-09-15 on the measurement machine.
+    # veth-host/veth-peer, what the actual netem topology uses (see
+    # netem/netem_common.sh), are 9 chars and were never affected.
+    if ! ip link add __pf_veth0 type veth peer name __pf_veth1 2>/dev/null; then
         fail "cannot create a veth pair ('ip link add ... type veth' failed)"
     else
-        ip link del __preflight_veth0 2>/dev/null
+        ip link del __pf_veth0 2>/dev/null
         ok "network namespaces + veth pairs work"
     fi
 
