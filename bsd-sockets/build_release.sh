@@ -18,9 +18,9 @@ build_one() {
         ;;
       clang)
         build_dir="build-clang"
-        compiler_label="Clang (libc++)"
-        c_compiler="clang"
-        cxx_compiler="clang++"
+        compiler_label="Clang 20 (libc++)"
+        c_compiler="clang-20"
+        cxx_compiler="clang++-20"
         # libc++ instead of the system's libstdc++: keeps energy/perf numbers
         # representative of clang's own standard library rather than GCC's,
         # and sidesteps clang picking up headers from whichever GCC version

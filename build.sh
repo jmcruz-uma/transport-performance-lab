@@ -202,10 +202,10 @@ build_project() {
   log "Building $project_dir"
   chmod +x "$build_script"
 
-  (
-    cd "$full_dir"
-    ./build_release.sh
-  )
+  if ! ( cd "$full_dir" && ./build_release.sh ); then
+    log "ERROR: build_release.sh failed for $project_dir -- see the compiler/cmake output above for the actual error"
+    return 1
+  fi
 }
 
 main() {
@@ -218,11 +218,29 @@ main() {
   ensure_netem_nopasswd_sudo
   setup_tls_assets
 
+  local failed_projects=()
+
   for project_dir in "${PROJECT_DIRS[@]}"; do
-    build_project "$project_dir"
+    # A build failure in ONE project must not stop the other 4 from being
+    # attempted -- they are otherwise-independent codebases sharing nothing
+    # but this coordinator script. Without the `||` here, `set -e` would
+    # abort the whole script at the first project that fails to compile,
+    # silently never even attempting every project queued after it (found
+    # 2026-09-15 while testing this ahead of the real-machine deployment:
+    # async-berkeley's clang build fails, which used to also prevent
+    # bsd-sockets and capy-corosio -- both otherwise fine -- from ever being
+    # built).
+    build_project "$project_dir" || failed_projects+=("$project_dir")
   done
 
-  log "Global build completed"
+  if [ "${#failed_projects[@]}" -eq 0 ]; then
+    log "Global build completed -- all projects built successfully"
+  else
+    log "Global build completed WITH FAILURES: ${failed_projects[*]}"
+    echo "The following project(s) failed to build (see the compiler/cmake output above for each): ${failed_projects[*]}"
+    echo "Every other project was still attempted and built if possible -- this failure is reported, not silent or total."
+    exit 1
+  fi
 }
 
 main "$@"

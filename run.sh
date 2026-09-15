@@ -371,13 +371,20 @@ run_project_once() {
   settle_before
 
   log "Running benchmarks for $project_dir"
-  (
-    cd "$full_dir"
-    python3 scripts/run_bench.py
-  )
+  local rc=0
+  ( cd "$full_dir" && python3 scripts/run_bench.py ) || rc=$?
 
+  # Collect whatever this project DID produce even on failure -- a crash
+  # partway through (e.g. scenario 5 of 7) still leaves earlier scenarios'
+  # checkpointed results on disk, worth keeping rather than discarding.
   copy_project_artifacts_if_exist "$project_dir"
   settle_after
+
+  if [ "$rc" -ne 0 ]; then
+    log "ERROR: run_bench.py failed for $project_dir (exit $rc) -- see the traceback above."
+    log "Continuing with the remaining projects instead of aborting the whole campaign (a crash in one project must not silently skip every project queued after it)."
+    return 1
+  fi
 }
 
 warmup_phase() {
@@ -512,8 +519,9 @@ main() {
 
   warmup_phase
 
+  local failed_projects=()
   for project_dir in "${projects[@]}"; do
-    run_project_once "$project_dir"
+    run_project_once "$project_dir" || failed_projects+=("$project_dir")
   done
 
   build_master_tables
@@ -524,6 +532,12 @@ main() {
   log "Master CSVs: $CSV_DIR/master_summary__<label>.csv"
   log "Master PDFs: $GLOBAL_REPORTS_DIR/master__<label>.pdf"
   log "Merged reports directory: $MERGED_REPORTS_DIR"
+
+  if [ "${#failed_projects[@]}" -gt 0 ]; then
+    log "WARNING: the following project(s) hit an error during their campaign: ${failed_projects[*]}"
+    log "Every other project was still attempted and its results (if any) collected above -- this failure is reported, not silent or total."
+    exit 1
+  fi
 }
 
 main "$@"

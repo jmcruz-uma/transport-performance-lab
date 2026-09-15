@@ -67,7 +67,29 @@ find_package(OpenSSL REQUIRED)
 set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
 
 if(TAPS_ENABLE_BENCHMARKS)
-    find_package(benchmark REQUIRED)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # The system's libbenchmark-dev is built against libstdc++; linking it
+        # into a -stdlib=libc++ binary breaks on std::string/vector ABI, so
+        # Clang builds its own copy instead (same version as the system package).
+        # Matches every other project in this repo (asio/async-berkeley/
+        # bsd-sockets/capy-corosio) -- taps-asio used to be the one exception,
+        # building+installing Google Benchmark itself into a hardcoded
+        # ~/Escritorio/TFM/ path outside the repo (fragile: not portable to a
+        # fresh machine's home directory layout, and its own staleness check
+        # only keyed on compiler NAME, not version, so switching clang-18 to
+        # clang-20 silently reused a clang-18-linked cache until caught by
+        # hand). FetchContent removes that whole class of problem.
+        include(FetchContent)
+        set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+        set(BENCHMARK_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(googlebenchmark
+            GIT_REPOSITORY https://github.com/google/benchmark.git
+            GIT_TAG v1.8.3)
+        FetchContent_MakeAvailable(googlebenchmark)
+    else()
+        find_package(benchmark REQUIRED)
+    endif()
 endif()
 
 add_subdirectory(tcpserver)

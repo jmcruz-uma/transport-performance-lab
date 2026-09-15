@@ -105,18 +105,7 @@ taps-asio/
 └── CMakeLists.txt
 ```
 
-The TAPS library is expected to live **outside this benchmarking project**, for example in a sibling directory:
-
-```text
-taps-asio/
-├── proyecto_taps/        # original TAPS library installation/build
-└── benchmark_taps/       # this benchmarking project
-```
-
-This layout is cleaner because it clearly separates:
-
-- the **base transport library**;
-- the **experimental benchmark project** built on top of it.
+The TAPS library is **not** installed separately or kept in a sibling directory. `CMakeLists.txt` fetches it automatically via CMake's `FetchContent` (tracking the tip of [taps_cpp](https://github.com/jmcruz-uma/taps_cpp)'s `main` branch) as part of the normal build -- there is nothing to clone, build, or install by hand first. If you specifically want to build against your own local TAPS checkout instead, pass `-DTAPS_ROOT=/path/to/your/taps/install` (an `<install>/include` + `<install>/lib/libtaps.a` tree) to `cmake`; this is an override for advanced use, not something the normal build needs.
 
 ---
 
@@ -199,27 +188,13 @@ This keeps the TAPS version closer to the simplified Corosio model currently use
 
 Several TAPS-specific decisions are important to understand this implementation.
 
-### 1. External installation is required
+### 1. TAPS is fetched automatically, not installed by hand
 
-TAPS is **not bundled** inside this project. You must install or build it yourself first, and then point this benchmark project to your local TAPS installation paths.
+`CMakeLists.txt` pulls TAPS in via `FetchContent` (tracking `taps_cpp`'s `main` branch) the first time you configure either build directory -- there is no separate install step, and `build_release.sh` has no path variables to edit. This also means `build-gcc/` and `build-clang/` each fetch and build their own independent copy of TAPS as part of `cmake --build`, already compiled with the right compiler/stdlib for that variant (see the next point).
 
-This is why the build script contains user-specific path variables such as:
+### 2. GCC and Clang each get their own TAPS build
 
-```bash
-TAPS_INSTALL_GCC="/your/path/to/taps/install-gcc"
-TAPS_INSTALL_CLANG="/your/path/to/taps/install-clang"
-```
-
-You must edit these paths to match **your own local environment** before building.
-
-### 2. Separate GCC and Clang TAPS installs
-
-The project assumes that TAPS may be built separately for GCC and Clang, for example:
-
-- one install tree for GCC;
-- one install tree for Clang + libc++.
-
-The benchmark build then links each variant against its corresponding TAPS installation.
+Because TAPS is fetched fresh into each build directory (`build-gcc/_deps/taps_cpp-build`, `build-clang/_deps/taps_cpp-build`), there is never a risk of linking a GCC-built TAPS into a Clang binary or vice versa -- `build_release.sh` wipes and reconfigures each build directory on every run, so this is automatic, not something to keep in sync by hand.
 
 ### 3. Not all allocations can be removed
 
@@ -262,19 +237,14 @@ Two **C++23** compilers are used:
 
 The goal is to compile the same code with both compilers and compare performance, scalability, and energy behavior.
 
-Example GCC setup with `update-alternatives`:
-
-```bash
-sudo update-alternatives --install /usr/bin/g++ g++ /usr/local/gcc-14.1.0/bin/g++-14.1.0 14
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/local/gcc-14.1.0/bin/gcc-14.1.0 14
-```
-
-Example Clang installation:
+This project uses the exact versions the rest of the repository standardizes on -- `gcc-14`/`g++-14` and `clang-20`/`clang++-20` (build_release.sh invokes clang by this exact versioned name, not the bare `clang`/`clang++`, since a bare invocation resolves `-stdlib=libc++` through a version-agnostic system symlink that can silently point at a different libc++ version than the compiler binary itself):
 
 ```bash
 sudo apt update
-sudo apt install clang
+sudo apt install gcc-14 g++-14 clang-20 libc++-20-dev libc++abi-20-dev
 ```
+
+(`clang-20`/`libc++-20` specifically, not `clang-18`: libc++-18 doesn't implement `std::stop_token` or `operator<=>` on a `std::vector` iterator, both of which other arms in this repo need -- clang-20's libc++ has both. See the root `preflight.sh` / README for the full, repo-wide prerequisite list and automated setup.)
 
 ### CMake
 
@@ -285,18 +255,17 @@ sudo apt install cmake
 
 ### Standalone Asio
 
-TAPS depends on standalone Asio. In this environment it is expected to be available from the system packages:
-
-```bash
-sudo apt update
-sudo apt install libasio-dev
-```
+Not a manual dependency here -- TAPS fetches its own copy of standalone Asio via `FetchContent` as part of building TAPS itself (see "About the TAPS library" above), so nothing needs to be installed system-wide for it.
 
 ### Google Benchmark
+
+Needed for the **GCC** build only, via the system package (`find_package(benchmark REQUIRED)` in `CMakeLists.txt`):
 
 ```bash
 sudo apt install libbenchmark-dev
 ```
+
+The **Clang** build instead fetches and builds its own copy via `FetchContent` automatically (the system package is linked against libstdc++, which is ABI-incompatible with a `-stdlib=libc++` binary) -- nothing to install for that case.
 
 ### Python
 
@@ -306,73 +275,28 @@ sudo apt install python3 python3-pip
 
 ---
 
-## Building the TAPS library
-
-If the TAPS library has not been built yet, you must build it first.
-
-A typical directory layout might be:
-
-```text
-~/Escritorio/TFM/taps-asio/
-├── proyecto_taps/
-└── benchmark_taps/
-```
-
-Typical commands to build the TAPS library may look like this:
-
-```bash
-cd ~/Escritorio/TFM/taps-asio/proyecto_taps
-rm -rf build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
-```
-
-If you maintain separate install trees for GCC and Clang, build and install both variants accordingly.
-
----
-
 ## Building the TAPS benchmark project
 
-The project is prepared for **Release** builds.
+The project is prepared for **Release** builds. Nothing needs to be built or installed beforehand -- TAPS and (for the Clang build) Google Benchmark are both fetched automatically as part of this one step.
 
 ### Recommended script
 
 ```bash
-sudo ./build_release.sh
+./build_release.sh          # builds both build-gcc/ and build-clang/
+./build_release.sh gcc      # or just one of the two
+./build_release.sh clang
 ```
 
-### Important manual path configuration
+(`sudo` is only actually needed later, to run the server/client/benchmark binaries or the automation script -- see "Running the project" below. Building itself needs no elevated privileges.)
 
-Before running the build script, **edit it** and set your own local TAPS installation paths.
+### What it does
 
-For example:
+For each compiler, `build_release.sh`:
 
-```bash
-TAPS_INSTALL_GCC="/your/path/to/taps/install-gcc"
-TAPS_INSTALL_CLANG="/your/path/to/taps/install-clang"
-```
+1. wipes and reconfigures `build-<compiler>/` from scratch (`cmake -S . -B build-<compiler> ...`, with `-DTAPS_TCP_USE_LIBCXX=ON` for Clang so `-stdlib=libc++` is used consistently for TAPS, this project, and Google Benchmark alike);
+2. builds `tcpserver`, `tcpserver_tls`, `tcpserver_tls_framed`, `udpserver`, `tcpclient`, and every `bench_*` target (`cmake --build`).
 
-These values are machine-specific. The project will not build correctly until they point to valid local TAPS installs.
-
-### Example manual build
-
-```bash
-rm -rf build-gcc build-clang
-
-cmake -S . -B build-gcc \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="/your/path/to/taps/install-gcc" \
-  -DCMAKE_CXX_COMPILER="/usr/local/gcc-14.1.0/bin/g++-14.1.0"
-
-cmake --build build-gcc --config Release -j"$(nproc)" \
-  --target tcpserver tcpclient bench_tcp
-```
-
-And similarly for Clang, adapting:
-
-- the compiler path;
-- the TAPS installation path;
-- any libc++ options required by your TAPS build.
+TAPS and, for Clang, Google Benchmark are pulled in transparently by `CMakeLists.txt` during step 1 -- see "About the TAPS library" and "Google Benchmark" above.
 
 ### GCC vs Clang builds
 

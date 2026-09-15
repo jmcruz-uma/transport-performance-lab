@@ -103,8 +103,19 @@ smoke_test_project() {
     wait "$server_pid" 2>/dev/null
     rm -f "$server_log"
 
-    if echo "$out" | grep -q "104857600"; then
-        echo "  [$project/$compiler] OK -- 100 MiB transferred correctly"
+    # downloaded_bytes (the last CSV column) is emitted in scientific
+    # notation by Google Benchmark's CSV reporter for large counters (e.g.
+    # "1.04858e+08", not "104857600") -- a literal string match for
+    # "104857600" never matches, which silently turned every single smoke
+    # test into a false FAIL regardless of whether the transfer actually
+    # worked (found 2026-09-15: all 5 projects x 2 compilers reported FAIL
+    # here despite every one of them correctly transferring the file).
+    # Parse the field numerically instead, with a tolerance for the CSV's
+    # ~6-significant-figure rounding.
+    local downloaded
+    downloaded="$(echo "$out" | awk -F',' '{print $NF}' | tr -d '"')"
+    if awk -v v="$downloaded" 'BEGIN { exit !(v >= 104857600 * 0.99) }' 2>/dev/null; then
+        echo "  [$project/$compiler] OK -- 100 MiB transferred correctly ($downloaded bytes)"
         return 0
     else
         echo "  [$project/$compiler] FAIL -- unexpected output: $out"

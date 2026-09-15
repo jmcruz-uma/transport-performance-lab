@@ -75,6 +75,11 @@ DRY_RUN="${DRY_RUN:-}"
 MANIFEST_DIR="$ROOT_DIR/results_netem"
 mkdir -p "$MANIFEST_DIR"
 
+# Points/projects where run_bench.py failed -- tracked instead of aborting
+# immediately (see run_point() below) so one bad grid point out of 24 doesn't
+# cost the rest of a multi-day sweep.
+SWEEP_FAILURES=()
+
 log() {
     printf '\n[%s] [netem-sweep] %s\n' "$(date '+%H:%M:%S')" "$*"
 }
@@ -183,10 +188,17 @@ run_point() {
         done
 
         log "Running [$NETEM_SCENARIOS] for $project_dir at RTT=${rtt_ms}ms loss=${loss_pct}%"
-        (
-            cd "$full_dir"
-            RUN_SCENARIOS="$NETEM_SCENARIOS" python3 scripts/run_bench.py
-        )
+        # A crash here (e.g. a project missing binaries for one of the
+        # requested scenarios) must not abort the whole 24-point sweep via
+        # `set -e` -- that would silently lose every remaining grid point,
+        # possibly days of measurement, over one bad combination. Recorded
+        # and reported at the end instead; this point/project's own results
+        # (if partial) are still collected by relocate_results below.
+        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" python3 scripts/run_bench.py ); then
+            log "ERROR: run_bench.py failed for $project_dir at RTT=${rtt_ms}ms loss=${loss_pct}% -- see the traceback above."
+            log "Continuing with the remaining projects/grid points instead of losing the rest of the sweep."
+            SWEEP_FAILURES+=("$project_dir @ RTT=${rtt_ms}ms loss=${loss_pct}%")
+        fi
 
         for scenario in $NETEM_SCENARIOS; do
             relocate_results "$project_dir" "$scenario" "$rtt_ms" "$loss_pct"
@@ -217,6 +229,16 @@ main() {
 
     log "Sweep finished. Per-project results under <project>/results/<scenario>__netem_rtt_<R>ms_loss_<L>pct/"
     log "TCP environment snapshots under $MANIFEST_DIR/"
+
+    if [ "${#SWEEP_FAILURES[@]}" -gt 0 ]; then
+        log "WARNING: ${#SWEEP_FAILURES[@]} (project, grid point) combination(s) failed during the sweep:"
+        local f
+        for f in "${SWEEP_FAILURES[@]}"; do
+            log "  - $f"
+        done
+        log "Every other combination was still attempted -- this failure is reported, not silent or total."
+        exit 1
+    fi
 }
 
 main "$@"

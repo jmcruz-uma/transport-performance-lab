@@ -37,7 +37,7 @@ install_packages() {
     log "Installing/updating required apt packages (idempotent)..."
     apt-get update -qq
 
-    # universe must be enabled for g++-14/clang-18/libc++-18 on a minimal
+    # universe must be enabled for g++-14/clang-20/libc++-20 on a minimal
     # (e.g. server ISO) Ubuntu 24.04 install -- desktop installs usually have
     # it already, but this is cheap and idempotent either way.
     if command -v add-apt-repository >/dev/null 2>&1; then
@@ -48,9 +48,10 @@ install_packages() {
     local packages=(
         build-essential git cmake make pkg-config
         gcc-14 g++-14
-        clang-18 clang
-        libc++-18-dev libc++abi-18-dev
+        clang-20
+        libc++-20-dev libc++abi-20-dev
         libssl-dev openssl
+        libbenchmark-dev
         iproute2 ethtool
         python3 python3-pip python3-venv python3-matplotlib
         linux-tools-common linux-tools-generic
@@ -101,30 +102,59 @@ check_compilers() {
     log "Checking compilers..."
     check_cmd gcc-14
     check_cmd g++-14
-    check_cmd clang-18
-    check_cmd clang++-18 || true
-    # "clang"/"clang++" must resolve to the -18 toolchain, since every
-    # build_release.sh invokes them by the bare name.
-    if command -v clang >/dev/null 2>&1; then
-        local v
-        v="$(clang --version | head -1)"
-        if echo "$v" | grep -q "18\."; then
-            ok "clang resolves to a clang-18 build ($v)"
-        else
-            fail "clang on PATH is not clang-18 ($v) -- every project's build_release.sh calls 'clang'/'clang++' by bare name"
-        fi
-    else
-        fail "'clang' not found on PATH (need it as the bare command, not just clang-18)"
-    fi
+    # Every build_release.sh invokes clang by the exact versioned command
+    # (clang-20/clang++-20), never the bare 'clang'/'clang++' name -- found
+    # 2026-09-15 that the bare name is NOT a reliable pin: '-stdlib=libc++'
+    # resolves headers via the version-agnostic /usr/include/c++/v1 symlink,
+    # which apt repoints to whichever libc++-N-dev was installed/upgraded
+    # most recently, regardless of which clang binary you actually invoke.
+    # With only libc++-18-dev installed that accidentally happened to match
+    # clang-18; once libc++-20-dev is also installed (needed for
+    # capy-corosio/async-berkeley -- see below), a bare 'clang' invocation
+    # would silently compile with a DIFFERENT libc++ than its own bundled
+    # one. Pinning both the compiler and the -dev package to the same
+    # version (20) sidesteps the ambiguity entirely instead of chasing it.
+    check_cmd clang-20
+    check_cmd clang++-20
 }
 
 check_libcxx() {
     log "Checking libc++..."
-    if dpkg -s libc++-18-dev >/dev/null 2>&1 && dpkg -s libc++abi-18-dev >/dev/null 2>&1; then
-        ok "libc++-18-dev and libc++abi-18-dev installed"
+    if dpkg -s libc++-20-dev >/dev/null 2>&1 && dpkg -s libc++abi-20-dev >/dev/null 2>&1; then
+        ok "libc++-20-dev and libc++abi-20-dev installed"
     else
-        fail "libc++-18-dev / libc++abi-18-dev missing (every clang build uses -stdlib=libc++)"
+        fail "libc++-20-dev / libc++abi-20-dev missing (every clang build uses -stdlib=libc++)"
+        return
     fi
+
+    # Not just "is the package installed" -- actually compile the two C++20
+    # library features capy-corosio and async-berkeley need (std::stop_token,
+    # and operator<=> on a std::vector iterator) through the exact
+    # clang-20 + -stdlib=libc++ invocation build_release.sh uses. clang-18's
+    # libc++ genuinely lacks both (confirmed 2026-09-15, not fixable by any
+    # flag); this catches that class of gap directly instead of trusting
+    # version numbers to imply capability.
+    local tmp_src tmp_obj
+    tmp_src="$(mktemp --suffix=.cpp)"
+    tmp_obj="$(mktemp)"
+    cat > "$tmp_src" <<'EOF'
+#include <vector>
+#include <stop_token>
+int main() {
+    std::vector<int> v{1, 2, 3};
+    auto cmp = v.begin() <=> v.end();
+    std::stop_token st;
+    (void)cmp; (void)st;
+}
+EOF
+    if clang++-20 -std=c++23 -stdlib=libc++ -c "$tmp_src" -o "$tmp_obj" 2>/dev/null; then
+        ok "clang-20 -stdlib=libc++ actually compiles std::stop_token and vector-iterator operator<=>"
+    else
+        fail "clang-20 -stdlib=libc++ cannot compile std::stop_token / vector-iterator operator<=>" \
+             "-- capy-corosio and async-berkeley's clang builds need both. Re-run" \
+             "'clang++-20 -std=c++23 -stdlib=libc++ -c $tmp_src' by hand to see the actual error."
+    fi
+    rm -f "$tmp_src" "$tmp_obj"
 }
 
 check_openssl() {
@@ -133,6 +163,27 @@ check_openssl() {
         ok "libssl-dev installed ($(openssl version 2>/dev/null))"
     else
         fail "libssl-dev missing (needed by every tls/tls_framed scenario, all 4 arms that have TLS)"
+    fi
+}
+
+check_google_benchmark() {
+    log "Checking Google Benchmark (system package, used by every project's GCC build)..."
+    # Every project's GCC build resolves Google Benchmark via
+    # find_package(benchmark REQUIRED) against the system package (the Clang
+    # build FetchContents its own copy instead -- see the comment in any
+    # benchmarks/CMakeLists.txt for why). Nothing in build.sh/preflight.sh
+    # used to install this: it only ever worked because libbenchmark-dev
+    # happened to already be present on this development machine from
+    # unrelated earlier work, which masked a real gap here (found 2026-09-15
+    # auditing the build ahead of the real-machine deployment -- a genuinely
+    # fresh Ubuntu 24.04 install would have failed to configure asio,
+    # async-berkeley, bsd-sockets, capy-corosio and taps-asio's GCC builds
+    # with "Could not find benchmark").
+    if dpkg -s libbenchmark-dev >/dev/null 2>&1 && \
+       dpkg -L libbenchmark-dev 2>/dev/null | grep -q 'cmake/benchmark/benchmarkConfig\.cmake$'; then
+        ok "libbenchmark-dev installed and find_package(benchmark) resolvable"
+    else
+        fail "libbenchmark-dev missing or its CMake config not found -- every project's GCC build needs this (find_package(benchmark REQUIRED))"
     fi
 }
 
@@ -266,6 +317,7 @@ main() {
     check_compilers
     check_libcxx
     check_openssl
+    check_google_benchmark
     check_cmake_version
     check_netem_netns
     check_rapl

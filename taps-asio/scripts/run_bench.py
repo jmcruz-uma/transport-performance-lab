@@ -260,7 +260,27 @@ IDLE_POWER_W = load_idle_power_w()
 # =========================
 # ENERGY
 # =========================
+def _check_rapl_available():
+    try:
+        with open(ENERGY_PATH) as f:
+            f.read()
+        return True
+    except OSError:
+        return False
+
+
+RAPL_AVAILABLE = _check_rapl_available()
+if not RAPL_AVAILABLE:
+    log(f"WARNING: RAPL energy counter not readable at {ENERGY_PATH} -- all "
+        f"energy_j values will be 0 for this run (expected on machines without "
+        f"RAPL, e.g. WSL2/VMs; on the real measurement machine this should never "
+        f"happen, since preflight.sh already verifies RAPL is readable before "
+        f"the campaign starts).")
+
+
 def read_energy():
+    if not RAPL_AVAILABLE:
+        return 0
     with open(ENERGY_PATH) as f:
         return int(f.read().strip())
 
@@ -688,21 +708,27 @@ def parse_benchmark_json(path):
             data = json.load(f)
 
         total_iterations = 0
+        downloaded_bytes = 0
 
         for entry in data.get("benchmarks", []):
             if entry.get("error_occurred", False):
-                return False, 0
+                return False, 0, 0
 
-            if entry.get("run_type") == "iteration":
-                total_iterations += entry.get("iterations", 0)
+            run_type = entry.get("run_type")
 
-        if total_iterations <= 0:
-            return False, 0
+            if run_type is None or run_type == "iteration":
+                total_iterations += int(entry.get("iterations", 0))
 
-        return True, total_iterations
+                if "downloaded_bytes" in entry:
+                    downloaded_bytes += int(float(entry.get("downloaded_bytes", 0)))
+
+        if total_iterations <= 0 and downloaded_bytes <= 0:
+            return False, 0, 0
+
+        return True, total_iterations, downloaded_bytes
 
     except Exception:
-        return False, 0
+        return False, 0, 0
 
 
 
@@ -756,15 +782,17 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
     energy_j_net = max(0.0, energy_j_raw - idle_energy_j_estimated)
 
     total_iterations = 0
+    total_downloaded_bytes = 0
     valid_json_files = []
     success = 0
     failed = 0
 
     for path in outputs:
         if os.path.exists(path):
-            valid, iters = parse_benchmark_json(path)
+            valid, iters, bytes_downloaded = parse_benchmark_json(path)
             if valid:
                 total_iterations += iters
+                total_downloaded_bytes += bytes_downloaded
                 valid_json_files.append(str(path))
                 success += 1
             else:
@@ -772,7 +800,14 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
         else:
             failed += 1
 
-    real_bytes = total_iterations * file_size_bytes
+    # Prefer the benchmark's own downloaded_bytes counter (accurate under UDP
+    # loss, where an "iteration" can legitimately complete with a short
+    # transfer -- see bench_udp.cpp) over iterations*file_size, which silently
+    # assumed every iteration delivered the whole file. Falls back to the old
+    # estimate only if the counter is unavailable/zero (e.g. older binaries).
+    real_bytes = total_downloaded_bytes
+    if real_bytes <= 0:
+        real_bytes = total_iterations * file_size_bytes
 
     throughput_mib_s = (
         real_bytes / (1024 * 1024) / elapsed_s
@@ -803,6 +838,18 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
 
 
 def run_campaign_for_compiler_and_threads(compiler, server_threads):
+    server_bin = get_server_bin(compiler)
+    bench_bin = get_bench_bin(compiler)
+    if not os.path.exists(server_bin) or not os.path.exists(bench_bin):
+        missing = server_bin if not os.path.exists(server_bin) else bench_bin
+        log(f"[{compiler}] SKIP scenario '{CURRENT_SCENARIO}': {missing} not found -- "
+            f"either this project/compiler combination does not implement this scenario "
+            f"(e.g. async-berkeley has no TLS binaries) or the build is incomplete. "
+            f"Skipping this (compiler, scenario) combination instead of raising, which "
+            f"used to abort the whole run.sh (set -e) and silently drop every project "
+            f"queued after this one.")
+        return []
+
     settle_before_campaign()
 
     file_size_bytes = get_file_size()

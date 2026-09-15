@@ -231,7 +231,27 @@ IDLE_POWER_W = load_idle_power_w()
 
 
 
+def _check_rapl_available():
+    try:
+        with open(ENERGY_PATH) as f:
+            f.read()
+        return True
+    except OSError:
+        return False
+
+
+RAPL_AVAILABLE = _check_rapl_available()
+if not RAPL_AVAILABLE:
+    log(f"WARNING: RAPL energy counter not readable at {ENERGY_PATH} -- all "
+        f"energy_j values will be 0 for this run (expected on machines without "
+        f"RAPL, e.g. WSL2/VMs; on the real measurement machine this should never "
+        f"happen, since preflight.sh already verifies RAPL is readable before "
+        f"the campaign starts).")
+
+
 def read_energy():
+    if not RAPL_AVAILABLE:
+        return 0
     with open(ENERGY_PATH) as f:
         return int(f.read().strip())
 
@@ -774,6 +794,18 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
 
 
 def run_campaign_for_compiler_and_threads(compiler, server_threads):
+    server_bin = get_server_bin(compiler)
+    bench_bin = get_bench_bin(compiler)
+    if not os.path.exists(server_bin) or not os.path.exists(bench_bin):
+        missing = server_bin if not os.path.exists(server_bin) else bench_bin
+        log(f"[{compiler}] SKIP scenario '{CURRENT_SCENARIO}': {missing} not found -- "
+            f"either this project/compiler combination does not implement this scenario "
+            f"(e.g. async-berkeley has no TLS binaries) or the build is incomplete. "
+            f"Skipping this (compiler, scenario) combination instead of raising, which "
+            f"used to abort the whole run.sh (set -e) and silently drop every project "
+            f"queued after this one.")
+        return []
+
     settle_before_campaign()
 
     file_size_bytes = get_file_size()

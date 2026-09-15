@@ -298,9 +298,12 @@ restore` if you ever want the machine back to how it was).
 Installs (via `apt-get`, idempotent) and then verifies -- not just "is the
 package installed" but "does the capability actually work":
 
-- compilers: `gcc-14`/`g++-14`, `clang-18` (and that the bare `clang`/`clang++`
-  commands resolve to the -18 toolchain, since every `build_release.sh` calls
-  them by that name), `libc++-18-dev`/`libc++abi-18-dev`
+- compilers: `gcc-14`/`g++-14`, `clang-20`/`clang++-20` (every `build_release.sh`
+  invokes clang by this exact versioned name, never the bare `clang`/`clang++`
+  -- see the note in `preflight.sh` for why that matters), `libc++-20-dev`/
+  `libc++abi-20-dev`, and that `-stdlib=libc++` actually compiles
+  `std::stop_token` and `operator<=>` on a `std::vector` iterator (libc++-18
+  genuinely lacks both -- capy-corosio and async-berkeley need clang-20)
 - `libssl-dev` (every TLS/TLS-framed scenario needs it)
 - `cmake` >= 3.20
 - network namespaces + veth pairs + the `sch_netem` qdisc actually work

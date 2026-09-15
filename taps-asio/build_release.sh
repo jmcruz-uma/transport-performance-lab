@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BENCHMARK_REPO_DIR="${HOME}/Escritorio/TFM/google-benchmark-src"
-BENCHMARK_INSTALL_GCC="${HOME}/Escritorio/TFM/google-benchmark-install-gcc"
-BENCHMARK_INSTALL_CLANG="${HOME}/Escritorio/TFM/google-benchmark-install-clang"
-
-CLANG_C_COMPILER="clang"
-CLANG_CXX_COMPILER="clang++"
+CLANG_C_COMPILER="clang-20"
+CLANG_CXX_COMPILER="clang++-20"
 
 GCC_C_COMPILER="gcc-14"
 GCC_CXX_COMPILER="g++-14"
@@ -15,89 +11,13 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
-ensure_google_benchmark_repo() {
-    if [ -d "$BENCHMARK_REPO_DIR/.git" ]; then
-        return
-    fi
-
-    rm -rf "$BENCHMARK_REPO_DIR"
-    git clone https://github.com/google/benchmark.git "$BENCHMARK_REPO_DIR"
-
-    if [ ! -d "$BENCHMARK_REPO_DIR/googletest/.git" ]; then
-        git -C "$BENCHMARK_REPO_DIR" clone https://github.com/google/googletest.git googletest
-    fi
-}
-
-ensure_benchmark_install() {
-    local compiler="$1"
-    local install_dir=""
-    local build_dir=""
-    local c_compiler=""
-    local cxx_compiler=""
-    local cxx_flags=""
-
-    case "$compiler" in
-      gcc)
-        install_dir="$BENCHMARK_INSTALL_GCC"
-        build_dir="$BENCHMARK_REPO_DIR/build-gcc"
-        c_compiler="$GCC_C_COMPILER"
-        cxx_compiler="$GCC_CXX_COMPILER"
-        ;;
-      clang)
-        install_dir="$BENCHMARK_INSTALL_CLANG"
-        build_dir="$BENCHMARK_REPO_DIR/build-clang"
-        c_compiler="$CLANG_C_COMPILER"
-        cxx_compiler="$CLANG_CXX_COMPILER"
-        # Must match the harness's stdlib choice below, or linking the
-        # static library into a libc++ binary breaks on std::string/vector ABI.
-        cxx_flags="-stdlib=libc++"
-        ;;
-      *)
-        echo "Unsupported compiler for benchmark: $compiler"
-        exit 1
-        ;;
-    esac
-
-    local config_file="$install_dir/lib/cmake/benchmark/benchmarkConfig.cmake"
-
-    if [ -f "$config_file" ]; then
-        echo "Using existing Google Benchmark install:"
-        echo "  $install_dir"
-        return
-    fi
-
-    echo "Google Benchmark not found for $compiler. Building it automatically..."
-
-    ensure_google_benchmark_repo
-
-    rm -rf "$build_dir"
-
-    cmake -S "$BENCHMARK_REPO_DIR" -B "$build_dir" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER="$c_compiler" \
-        -DCMAKE_CXX_COMPILER="$cxx_compiler" \
-        -DCMAKE_CXX_FLAGS="$cxx_flags" \
-        -DCMAKE_CXX_STANDARD=23 \
-        -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-        -DCMAKE_CXX_EXTENSIONS=OFF \
-        -DBENCHMARK_ENABLE_GTEST_TESTS=OFF \
-        -DBENCHMARK_DOWNLOAD_DEPENDENCIES=OFF \
-        -DCMAKE_INSTALL_PREFIX="$install_dir"
-
-    cmake --build "$build_dir" -j"$(nproc)"
-    cmake --install "$build_dir"
-}
-
 build_one() {
     local compiler="$1"
     local build_dir=""
     local compiler_label=""
     local c_compiler=""
     local cxx_compiler=""
-    local benchmark_prefix=""
-    local benchmark_dir=""
     local use_libcxx="OFF"
-    local extra_cmake_args=()
 
     case "$compiler" in
       gcc)
@@ -105,20 +25,14 @@ build_one() {
         compiler_label="GCC 14"
         c_compiler="$GCC_C_COMPILER"
         cxx_compiler="$GCC_CXX_COMPILER"
-        benchmark_prefix="$BENCHMARK_INSTALL_GCC"
-
-        ensure_benchmark_install gcc
         ;;
 
       clang)
         build_dir="build-clang"
-        compiler_label="Clang (libc++)"
+        compiler_label="Clang 20 (libc++)"
         c_compiler="$CLANG_C_COMPILER"
         cxx_compiler="$CLANG_CXX_COMPILER"
-        benchmark_prefix="$BENCHMARK_INSTALL_CLANG"
         use_libcxx="ON"
-
-        ensure_benchmark_install clang
         ;;
 
       *)
@@ -137,25 +51,26 @@ build_one() {
         exit 1
     fi
 
-    benchmark_dir="$benchmark_prefix/lib/cmake/benchmark"
-
-    extra_cmake_args=(
-      -Dbenchmark_DIR="$benchmark_dir"
-      -DTAPS_TCP_USE_LIBCXX="$use_libcxx"
-      -DTAPS_ENABLE_BENCHMARKS=ON
-      -DCMAKE_CXX_STANDARD=23
-      -DCMAKE_CXX_STANDARD_REQUIRED=ON
-      -DCMAKE_CXX_EXTENSIONS=OFF
-    )
-
     rm -rf "$build_dir"
 
+    # Google Benchmark comes from taps-asio/CMakeLists.txt now (FetchContent
+    # for Clang, system find_package(benchmark) for GCC) -- same convention
+    # every other project in this repo already uses. This used to build+
+    # install its own copy into a hardcoded ~/Escritorio/TFM/ path outside
+    # the repo: not portable to a fresh machine's home directory layout, and
+    # its "already installed" cache check keyed only on compiler NAME, not
+    # version, so switching clang-18 to clang-20 silently kept reusing a
+    # clang-18-linked static library until caught by hand (found 2026-09-15
+    # auditing the build ahead of the real-machine deployment).
     cmake -S . -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$benchmark_prefix" \
         -DCMAKE_C_COMPILER="$c_compiler" \
         -DCMAKE_CXX_COMPILER="$cxx_compiler" \
-        "${extra_cmake_args[@]}"
+        -DTAPS_TCP_USE_LIBCXX="$use_libcxx" \
+        -DTAPS_ENABLE_BENCHMARKS=ON \
+        -DCMAKE_CXX_STANDARD=23 \
+        -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+        -DCMAKE_CXX_EXTENSIONS=OFF
 
     cmake --build "$build_dir" --config Release -j"$(nproc)" \
         --target tcpserver tcpserver_tls tcpserver_tls_framed udpserver tcpclient \
@@ -165,8 +80,7 @@ build_one() {
     echo ""
     echo "TAPS TCP Release build completed with $compiler_label."
     echo "TAPS fetched via FetchContent (see taps-asio/CMakeLists.txt)."
-    echo "Using Google Benchmark from:"
-    echo "  $benchmark_prefix"
+    echo "Google Benchmark fetched via FetchContent (Clang) or system find_package (GCC) -- see taps-asio/CMakeLists.txt."
     echo "Executables:"
     echo "  $build_dir/tcpserver/tcpserver"
     echo "  $build_dir/tcpclient/tcpclient"

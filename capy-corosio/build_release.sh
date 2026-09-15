@@ -18,13 +18,19 @@ build_one() {
         ;;
       clang)
         build_dir="build-clang"
-        compiler_label="Clang (libc++)"
-        c_compiler="clang"
-        cxx_compiler="clang++"
+        compiler_label="Clang 20 (libc++)"
+        c_compiler="clang-20"
+        cxx_compiler="clang++-20"
         # libc++ instead of the system's libstdc++: keeps energy/perf numbers
         # representative of clang's own standard library rather than GCC's,
         # and sidesteps clang picking up headers from whichever GCC version
         # happens to be newest on the machine (it broke against GCC 16 here).
+        # Needs clang-20/libc++-20, not clang-18/libc++-18: corosio/capy use
+        # std::stop_token and operator<=> on std::vector iterators, neither
+        # of which libc++-18 implements (found 2026-09-15 auditing the build
+        # ahead of the real-machine deployment -- confirmed no flag fixes
+        # this under libc++-18; -fexperimental-library alone is not enough,
+        # it's a genuine version gap). libc++-20 has both with no extra flag.
         cxx_flags="-stdlib=libc++"
         ;;
       *)
