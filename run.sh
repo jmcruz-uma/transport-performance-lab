@@ -344,7 +344,21 @@ copy_project_artifacts_if_exist() {
       cp -r "$results_dir/plots/." "$project_out_dir/plots/" 2>/dev/null || true
     fi
 
-    log "Copied artifacts for $project_dir / $label"
+    # Gated on the one file build_master_tables() actually needs
+    # (macro_bench_summary.json) -- this used to log the same "Copied
+    # artifacts" success line unconditionally, even for a label directory
+    # that only ever got as far as results/<label>/logs/ before its
+    # run_bench.py crashed (e.g. udp_k64 timing out in wait_for_server,
+    # 2026-09-18): nothing meaningful was collected, but the log read like
+    # a clean success, masking exactly the kind of failure this line exists
+    # to surface. copy_if_exists is silent on a missing source by design
+    # (most labels legitimately lack some optional artifact), so this is
+    # the one line in the whole function that should NOT lie.
+    if [ -f "$SUMMARIES_DIR/$label/${project_dir}_summary.json" ]; then
+      log "Copied artifacts for $project_dir / $label"
+    else
+      log "WARNING: no macro_bench_summary.json found for $project_dir / $label -- that scenario/grid-point likely never completed (check its results/$label/logs/)"
+    fi
   done
 
   if [ "$found_any" -eq 0 ]; then
@@ -452,13 +466,26 @@ build_master_tables() {
         ;;
     esac
 
-    python3 "$script" \
+    # Deliberately not fatal (this script has `set -e`): build_master_summary.py
+    # exits non-zero when a label has zero *_summary.json files (e.g. every
+    # run for that scenario/grid-point failed -- udp_k64 did, for real,
+    # 2026-09-18, see is_udp_server_ready in the 5 run_bench.py files). An
+    # unguarded call here would abort this whole loop right there under
+    # set -e, silently dropping the master table for every alphabetically
+    # LATER label too -- confirmed this is exactly why whole_object's master
+    # table went missing that run despite its per-project data being
+    # complete and sitting right there in $SUMMARIES_DIR/whole_object/: it
+    # sorts after udp_k64, so the loop never reached it. One broken scenario
+    # must not cost every other, unrelated scenario its comparison table.
+    if ! python3 "$script" \
       --input-dir "${label_dir%/}" \
       --json-out "$SUMMARIES_DIR/master_summary__${label}.json" \
       --csv-out "$CSV_DIR/master_summary__${label}.csv" \
       --pdf-out "$GLOBAL_REPORTS_DIR/master__${label}.pdf" \
       --plots-dir "$GLOBAL_PLOTS_DIR/$label" \
-      "${plot_exclude_args[@]}"
+      "${plot_exclude_args[@]}"; then
+      log "WARNING: build_master_summary.py failed for label '$label' (see the message above -- likely no successful runs for this scenario/grid-point). Continuing with the remaining labels instead of losing their master tables too."
+    fi
   done
 
   log "Master tables written under $SUMMARIES_DIR/master_summary__<label>.json (+ .csv, + PDF under $GLOBAL_REPORTS_DIR)"
