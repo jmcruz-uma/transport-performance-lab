@@ -453,18 +453,16 @@ build_master_tables() {
     log "Generating comparison table and PDF report for: $label"
     mkdir -p "$GLOBAL_PLOTS_DIR/$label"
 
-    # capy-corosio's TLS runtime is a known ~20x+ outlier (openssl_stream
-    # lacking a compound read/write op -- see design/tls_experiment_notes.md;
-    # jmcruz's call: keep its data, keep it out of the plots so it doesn't
-    # compress the other 4 arms' axis). --exclude-from-plots only affects the
-    # PDF's plots/best-of tables -- the JSON/CSV for this label still include
-    # corosio in full, and it gets its own upstream report separately.
+    # capy-corosio's TLS runtime looked like a ~20x+ outlier in an earlier,
+    # WSL2-loopback pilot (openssl_stream lacking a compound read/write op --
+    # see design/tls_experiment_notes.md) and was excluded from tls/tls_framed
+    # plots on that basis. That did not reproduce on real hardware (2026-09-18
+    # real-machine data: corosio is competitive with, sometimes faster than,
+    # the rest of the cluster under TLS) -- the exclusion is gone, corosio's
+    # numbers are plotted like everyone else's again. --exclude-from-plots
+    # itself stays available on build_master_summary.py as a general-purpose
+    # option, just unused here now.
     local plot_exclude_args=()
-    case "$label" in
-      tls|tls__*|tls_framed|tls_framed__*)
-        plot_exclude_args=(--exclude-from-plots capy-corosio)
-        ;;
-    esac
 
     # Deliberately not fatal (this script has `set -e`): build_master_summary.py
     # exits non-zero when a label has zero *_summary.json files (e.g. every
