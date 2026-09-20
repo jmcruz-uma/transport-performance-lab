@@ -5,4 +5,5 @@ target_link_libraries(tcpserver_tls_framed
     PRIVATE
         Boost::corosio_openssl   # the OpenSSL TLS backend; links Boost::corosio + OpenSSL transitively
         OpenSSL::Crypto          # for OpenSSL_version() called directly
+        Threads::Threads
 )

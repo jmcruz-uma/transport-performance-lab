@@ -5,6 +5,7 @@ add_executable(tcpserver
 target_link_libraries(tcpserver
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
 )
 
 target_compile_features(tcpserver

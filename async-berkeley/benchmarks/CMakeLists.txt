@@ -21,6 +21,7 @@ add_executable(bench_tcp
 target_link_libraries(bench_tcp
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
@@ -36,6 +37,7 @@ add_executable(bench_tcp_whole
 target_link_libraries(bench_tcp_whole
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
@@ -57,6 +59,7 @@ target_include_directories(bench_tcp_framed
 target_link_libraries(bench_tcp_framed
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
@@ -72,6 +75,7 @@ add_executable(bench_udp
 target_link_libraries(bench_udp
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 

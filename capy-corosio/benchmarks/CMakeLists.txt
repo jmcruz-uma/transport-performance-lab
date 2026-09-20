@@ -21,7 +21,7 @@ target_link_libraries(bench_tcp
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio
-    pthread
+    Threads::Threads
 )
 
 target_compile_features(bench_tcp PRIVATE cxx_std_23)
@@ -33,7 +33,7 @@ target_link_libraries(bench_tcp_whole
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio
-    pthread
+    Threads::Threads
 )
 
 target_compile_features(bench_tcp_whole PRIVATE cxx_std_23)
@@ -48,7 +48,7 @@ target_link_libraries(bench_tcp_framed
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio
-    pthread
+    Threads::Threads
 )
 
 target_compile_features(bench_tcp_framed PRIVATE cxx_std_23)
@@ -60,7 +60,7 @@ target_link_libraries(bench_udp
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio
-    pthread
+    Threads::Threads
 )
 
 target_compile_features(bench_udp PRIVATE cxx_std_23)
@@ -75,7 +75,7 @@ target_link_libraries(bench_tcp_tls
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio_openssl   # OpenSSL TLS backend; pulls Boost::corosio + OpenSSL
-    pthread
+    Threads::Threads
     OpenSSL::Crypto          # for OpenSSL_version() called directly
 )
 
@@ -90,7 +90,7 @@ target_link_libraries(bench_tcp_tls_framed
     benchmark::benchmark
     benchmark::benchmark_main
     Boost::corosio_openssl   # OpenSSL TLS backend; pulls Boost::corosio + OpenSSL
-    pthread
+    Threads::Threads
     OpenSSL::Crypto          # for OpenSSL_version() called directly
 )
 target_compile_features(bench_tcp_tls_framed PRIVATE cxx_std_23)
