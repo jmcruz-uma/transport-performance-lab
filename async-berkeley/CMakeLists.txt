@@ -41,7 +41,12 @@ else()
     add_subdirectory("${ASYNC_BERKELEY_DIR}" "${CMAKE_BINARY_DIR}/async-berkeley-build")
 endif()
 
+# "framed" reuses tls/frame_reader.hpp (TLS-agnostic despite the directory --
+# it's the shared deframing loop every "framed"/"tls_framed" client uses).
+set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
+
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_framed)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 

@@ -103,7 +103,7 @@ PDF_RESULTS = MAIN_PDF_WITH_RAW
 COMPARISON_PDF_RESULTS = COMPARISON_PDF_WITH_RAW
 
 # =========================
-# SCENARIOS (E0 streaming / E1 whole_object / E3 blocks / E4 udp_k64,k1400)
+# SCENARIOS (E0 streaming / E1 whole_object / E3 framed / E4 udp_k64,k1400)
 # =========================
 CURRENT_SCENARIO = None
 SERVER_DIR = "tcpserver"

@@ -11,21 +11,37 @@ nothing to toggle by hand.
                     contiguously. Non-TAPS: accumulate into one growing buffer.
                     TAPS: PassthroughFramer(gather=true) -> one receive() ->
                     as_bytes().
-  blocks        E3  one logical Message, consumed segment by segment WITHOUT
-                    materialising the whole thing. Non-TAPS: read loop with a
-                    64 KiB buffer, process each, never accumulate. TAPS:
-                    PassthroughFramer(gather=false) -> iterate blocks(). (Block
-                    size fixed at 64 KiB; an application-set size via
-                    TransportProperties is future work, design doc 5.8.)
+  framed        E3  length-prefixed application framing, NO security layer --
+                    the plaintext mirror of "tls_framed" (same manifest, same
+                    frame format, same deframing loop, just no TLS record
+                    layer), so framing cost can be measured on its own instead
+                    of only ever bundled with TLS's cost. Replaces an earlier
+                    "blocks" scenario that tried to measure segment-by-segment
+                    Message consumption via taps::PassthroughFramer(gather=false)
+                    -- that framer can only ever emit after the connection's
+                    half-close (no boundary marker exists on a raw-until-close
+                    wire for it to key off), so it was structurally incapable
+                    of the incremental delivery its description implied.
+                    taps::LengthPrefixedFramer does real incremental delivery
+                    (its parse() ignores at_eof and emits the instant a full
+                    record has arrived), already proven correct by
+                    "tls_framed"'s real-hardware data -- this scenario is that
+                    same design with TLS removed. Non-TAPS: the shared
+                    tls/frame_reader.hpp deframing loop (TLS-agnostic despite
+                    the directory). TAPS: LengthPrefixedFramer, same as
+                    "tls_framed".
   udp_k64       E4  the same transfer over UDP, max-size IPv4 datagrams
                     (65507 bytes -- true limit, "64 KiB" literally overflows
                     it), 5-way.
   udp_k1400     E4  same, ~MTU-sized datagrams.
 
-Same wire for streaming / whole_object / blocks (raw-until-close), so they all
-share `tcpserver`. Per-scenario grid / target binaries / env live in SCENARIOS.
-Output and resume-state are per scenario: results/<scenario>/... so a crashed
-campaign resumes and `run.sh` aggregates each scenario independently.
+Same wire for streaming / whole_object (raw-until-close), so they share
+`tcpserver`. "framed" has its own wire (length-prefixed messages, no security)
+and its own server, `tcpserver_framed`, mirroring "tls_framed"'s
+`tcpserver_tls_framed` minus the TLS record layer. Per-scenario grid / target
+binaries / env live in SCENARIOS. Output and resume-state are per scenario:
+results/<scenario>/... so a crashed campaign resumes and `run.sh` aggregates
+each scenario independently.
 
 Env:
   RUN_SCENARIOS="framed udp"   run only these (space/comma separated); default all
@@ -54,7 +70,8 @@ _TLS_ENV = {"TLS_CERT": "../tls/server.crt",
 SCENARIOS = {
     "streaming":    dict(server="tcpserver", bench="bench_tcp",        **_TCP_GRID),
     "whole_object": dict(server="tcpserver", bench="bench_tcp_whole",  **_TCP_GRID),
-    "blocks":       dict(server="tcpserver", bench="bench_tcp_blocks", **_TCP_GRID),
+    "framed":       dict(server="tcpserver_framed", bench="bench_tcp_framed",
+                         env={"MANIFEST": "../tls/manifest.txt"}, **_TCP_GRID),
     "tls":          dict(server="tcpserver_tls", bench="bench_tcp_tls",
                          env=dict(_TLS_ENV), **_TCP_GRID),
     "tls_framed":   dict(server="tcpserver_tls_framed", bench="bench_tcp_tls_framed",

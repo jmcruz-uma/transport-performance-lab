@@ -219,7 +219,7 @@ never leaves the namespace or a qdisc behind): the topology is torn down.
 NETEM_RTTS_MS="0 1 5 10 20 50"       # target RTTs in ms (default shown)
 NETEM_LOSS_PCT="0 0.1 1 5"           # target average loss rates in % (default shown)
 NETEM_MEAN_BURST_PKTS=3              # Simple Gilbert: mean consecutive packets per loss event
-NETEM_SCENARIOS="streaming whole_object blocks tls tls_framed udp_k64 udp_k1400"  # default: every scenario
+NETEM_SCENARIOS="streaming whole_object framed tls tls_framed udp_k64 udp_k1400"  # default: every scenario
 NETEM_PROJECTS="asio taps-asio async-berkeley bsd-sockets capy-corosio"
 NETEM_RATE_MBIT=1000                 # bandwidth cap paired with the delay
 NETEM_LIMIT_PKTS=50000               # netem queue depth
@@ -466,7 +466,7 @@ of this, `apply` refuses to run again on top of an existing state file --
 
 ## Every result, from every experiment, has the same shape
 
-Every scenario -- `streaming`/`whole_object`/`blocks`/`tls`/`tls_framed`/
+Every scenario -- `streaming`/`whole_object`/`framed`/`tls`/`tls_framed`/
 `udp_k64`/`udp_k1400`, under plain loopback (`run.sh`) or under any point of
 the D7 netem RTT x loss grid (`netem/run_rtt_sweep.sh`) -- is produced by the
 exact same code path in each project's `scripts/run_bench.py`. The netem
