@@ -364,31 +364,7 @@ def read_text_file(path):
 # =========================
 # PORT MANAGEMENT
 # =========================
-def _udp_port_bound(host, port):
-    """is_port_open's TCP connect() can never succeed against a UDP socket
-    (udpserver), so probe readiness by looking for the port in /proc/net/udp
-    instead. Read inside NETEM_SERVER_NETNS when the D7 sweep has set one --
-    each netns has its own independent /proc/net/udp view."""
-    port_hex = f"{port:04X}"
-    try:
-        out = subprocess.run(
-            _maybe_netns_wrap(["cat", "/proc/net/udp", "/proc/net/udp6"]),
-            capture_output=True, text=True, timeout=1.0,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 2 or ":" not in parts[1]:
-            continue
-        if parts[1].split(":")[1].upper() == port_hex:
-            return True
-    return False
-
-
 def is_port_open(host, port, timeout=0.5):
-    if SERVER_DIR == "udpserver":
-        return _udp_port_bound(host, port)
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
