@@ -52,7 +52,7 @@ install_packages() {
         libc++-20-dev libc++abi-20-dev
         libssl-dev openssl
         libbenchmark-dev
-        iproute2 ethtool
+        iproute2 ethtool curl
         python3 python3-pip python3-venv python3-matplotlib
         linux-tools-common linux-tools-generic
     )
@@ -212,10 +212,14 @@ check_netem_netns() {
     fi
     ip netns del __preflight_test 2>/dev/null
 
-    if ! ip link add __preflight_veth0 type veth peer name __preflight_veth1 2>/dev/null; then
+    # Names must fit in IFNAMSIZ (16 bytes incl. null terminator, so 15 usable
+    # chars) -- "__preflight_veth0/1" (17 chars) is too long and makes
+    # 'ip link add' fail at argument parsing with "not a valid ifname",
+    # regardless of privileges. Confirmed 2026-09-15.
+    if ! ip link add __pf_veth0 type veth peer name __pf_veth1 2>/dev/null; then
         fail "cannot create a veth pair ('ip link add ... type veth' failed)"
     else
-        ip link del __preflight_veth0 2>/dev/null
+        ip link del __pf_veth0 2>/dev/null
         ok "network namespaces + veth pairs work"
     fi
 
@@ -266,6 +270,11 @@ check_network() {
             warn "could not verify GitHub reachability (no curl, and git ls-remote failed or git missing) -- verify manually"
         fi
     fi
+}
+
+check_curl() {
+    log "Checking curl (run_everything.sh notifies ntfy.sh with it when the campaign ends)..."
+    check_cmd curl
 }
 
 check_disk_space() {
@@ -322,6 +331,7 @@ main() {
     check_netem_netns
     check_rapl
     check_network
+    check_curl
     check_disk_space
     check_python_modules
 
