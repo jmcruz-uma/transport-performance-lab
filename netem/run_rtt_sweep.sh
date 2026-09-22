@@ -174,6 +174,18 @@ run_point() {
     fi
     capture_tcp_environment "$rtt_ms" "$loss_pct"
 
+    # 25 repetitions is fine at the grid's easy end, but a calibration probe
+    # (2026-09-22, RTT=50ms/loss=5%, bsd-sockets/blocks) found a single
+    # case=1 repetition can legitimately take ~2326s to complete -- 25 of
+    # those is ~16h for one (compiler, server_threads) combination alone.
+    # Cut repetitions at the harsh end of the grid instead of pretending the
+    # easy-end sample size is affordable everywhere.
+    local reps_override="25"
+    if python3 -c "import sys; sys.exit(0 if (float('$rtt_ms') >= 50 or float('$loss_pct') >= 5) else 1)"; then
+        reps_override="15"
+        log "Hard grid point (RTT=${rtt_ms}ms loss=${loss_pct}%) -- reducing MACRO_REPETITIONS to $reps_override"
+    fi
+
     for project_dir in $NETEM_PROJECTS; do
         local full_dir="$ROOT_DIR/$project_dir"
         local run_script="$full_dir/scripts/run_bench.py"
@@ -194,7 +206,7 @@ run_point() {
         # possibly days of measurement, over one bad combination. Recorded
         # and reported at the end instead; this point/project's own results
         # (if partial) are still collected by relocate_results below.
-        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" python3 scripts/run_bench.py ); then
+        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$reps_override" python3 scripts/run_bench.py ); then
             log "ERROR: run_bench.py failed for $project_dir at RTT=${rtt_ms}ms loss=${loss_pct}% -- see the traceback above."
             log "Continuing with the remaining projects/grid points instead of losing the rest of the sweep."
             SWEEP_FAILURES+=("$project_dir @ RTT=${rtt_ms}ms loss=${loss_pct}%")

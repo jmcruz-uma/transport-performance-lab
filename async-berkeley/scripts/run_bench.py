@@ -74,7 +74,7 @@ LOGS_DIR = RESULTS_DIR / "logs"
 
 MACRO_BENCH_CASES = [1, 2, 4, 8, 16]
 SERVER_THREADS = [1, 2, 4, 8]
-MACRO_REPETITIONS = 25
+MACRO_REPETITIONS = int(os.environ.get("MACRO_REPETITIONS", "25"))
 
 BENCH_ARGS = [
     "--benchmark_out_format=json"
@@ -175,11 +175,14 @@ PORT_RETRY_SPAN = 200
 # repetition that doesn't finish in time is killed and counted as failed
 # (parse_benchmark_json already treats a missing/invalid output file as
 # `failed`, so this needs no other downstream change), and the campaign moves
-# on. Generous by design -- this must never fire on a legitimately slow but
-# completing transfer (the worst case measured so far, corosio TLS under
-# RTT=10ms/loss=1%, was ~21s) -- override via BENCH_CLIENT_TIMEOUT_SECONDS if
-# a harsher point in the D7 grid ever needs more headroom.
-BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "600"))
+# on. 600s (this constant's original value) turned out NOT generous enough:
+# a calibration probe on 2026-09-22 (RTT=50ms/loss=5%, case=1, no
+# contention -- the actual worst case, not the highest-parallelism one)
+# measured a legitimately-completing transfer take 2326s. Raised to 4200s
+# (~1.8x that) instead of assuming case=1 was the true ceiling; still
+# override via BENCH_CLIENT_TIMEOUT_SECONDS if a harsher point ever needs
+# more.
+BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "4200"))
 
 TABLE_WRAP_MAIN = 20
 TABLE_WRAP_COMPARISON = 18
