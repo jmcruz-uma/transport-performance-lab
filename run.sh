@@ -401,6 +401,71 @@ run_project_once() {
   fi
 }
 
+# ==========================================================================
+# RESUME SAFETY: undo run_rtt_sweep.sh's stash_preexisting_results()
+# ==========================================================================
+# The D7 sweep (netem/run_rtt_sweep.sh) moves each project's results/<scenario>
+# aside to results/<scenario>__preexisting_backup_<timestamp> before it runs,
+# so it never silently overwrites a loopback campaign's data with a netem
+# one. Correct for the sweep itself, but it also means the checkpoint this
+# script relies on (is_done()/mark_done() in bench_scenarios.py, checked via
+# results/<scenario>/checkpoints/) disappears from the plain path -- so
+# restarting the pipeline after the sweep has touched a project makes this
+# script silently redo that project's entire baseline campaign. Confirmed for
+# real 2026-09-22 (~28h wasted the first time). Also guards a subtler case:
+# if the sweep was interrupted (Ctrl+C) right after finishing a scenario but
+# before relocate_results moved it to its __netem_rtt_... name, that
+# scenario's netem-shaped result is left at the plain path WITH a valid
+# "done" checkpoint -- silently mislabelling shaped data as the loopback
+# baseline (hit for real: async-berkeley's streaming/whole_object).
+restore_preexisting_backups() {
+  local project_dir full_dir backup scenario plain results_json host mislabelled
+  local -A latest_backup
+
+  for project_dir in "${PROJECT_DIRS[@]}"; do
+    full_dir="$ROOT_DIR/$project_dir"
+    [ -d "$full_dir/results" ] || continue
+
+    latest_backup=()
+    for backup in "$full_dir"/results/*__preexisting_backup_*; do
+      [ -d "$backup" ] || continue
+      scenario="$(basename "$backup")"
+      scenario="${scenario%%__preexisting_backup_*}"
+      # Glob order is lexicographic ascending; the backup timestamp suffix
+      # (%Y%m%d_%H%M%S) sorts the same way, so the last match wins here.
+      latest_backup["$scenario"]="$backup"
+    done
+
+    for scenario in "${!latest_backup[@]}"; do
+      backup="${latest_backup[$scenario]}"
+      plain="$full_dir/results/$scenario"
+
+      if [ -e "$plain" ]; then
+        if [ ! -f "$plain/checkpoints/scenario_done.json" ]; then
+          # No checkpoint = never finished (e.g. the sweep was interrupted
+          # mid-scenario) -- never trustworthy, regardless of host.
+          mislabelled="${plain}__superseded_incomplete_$(date '+%Y%m%d_%H%M%S')"
+          log "WARNING: $plain has no checkpoint (an interrupted/incomplete run left it here) -- moving to $mislabelled"
+          mv "$plain" "$mislabelled"
+        else
+          results_json="$plain/raw/macro_bench_results.json"
+          host="$(python3 -c "import json; print(json.load(open('$results_json')).get('host', '?'))" 2>/dev/null)"
+          if [ -n "$host" ] && [ "$host" != "127.0.0.1" ]; then
+            mislabelled="${plain}__superseded_mislabeled_$(date '+%Y%m%d_%H%M%S')"
+            log "WARNING: $plain is checkpointed done but its data is from host=$host (a D7 sweep leftover, not the loopback baseline) -- moving to $mislabelled"
+            mv "$plain" "$mislabelled"
+          fi
+        fi
+      fi
+
+      if [ ! -e "$plain" ]; then
+        log "Restoring $project_dir/results/$scenario from $(basename "$backup") (a prior D7 sweep run stashed it aside)"
+        mv "$backup" "$plain"
+      fi
+    done
+  done
+}
+
 warmup_phase() {
   if [ "$WARMUP_ENABLED" != "1" ]; then
     log "Warmup disabled"
@@ -530,6 +595,7 @@ main() {
   fi
 
   measure_idle_if_available
+  restore_preexisting_backups
 
   local projects=("${PROJECT_DIRS[@]}")
 
