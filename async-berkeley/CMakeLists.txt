@@ -22,6 +22,18 @@ message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
 
 option(ASYNC_TCP_ENABLE_BENCHMARKS "Enable Google Benchmark benchmarks" ON)
 
+# The server worker pools spawn std::thread directly. On this project's
+# target platform (Ubuntu 24.04, glibc >= 2.34) pthread is merged into libc,
+# so std::thread already works without this -- confirmed empirically, not
+# just assumed, 2026-09-19: a std::thread-spawning binary linked with no
+# threading library at all still produced real OS threads in
+# /proc/<pid>/task, under both gcc and clang. Linked explicitly anyway for
+# portability to any toolchain where that merge doesn't hold, and so
+# `server_threads` -- a core factor of the experimental matrix -- is never
+# resting on an assumption about the deployment glibc instead of a declared
+# dependency.
+find_package(Threads REQUIRED)
+
 # Fetched from GitHub by default (no manual setup needed, pinned to the commit
 # this branch was validated against); set ASYNC_BERKELEY_DIR yourself to reuse
 # an existing checkout instead.
@@ -41,7 +53,12 @@ else()
     add_subdirectory("${ASYNC_BERKELEY_DIR}" "${CMAKE_BINARY_DIR}/async-berkeley-build")
 endif()
 
+# "framed" reuses tls/frame_reader.hpp (TLS-agnostic despite the directory --
+# it's the shared deframing loop every "framed"/"tls_framed" client uses).
+set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
+
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_framed)
 add_subdirectory(tcpclient)
 add_subdirectory(udpserver)
 

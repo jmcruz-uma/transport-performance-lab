@@ -21,6 +21,7 @@ add_executable(bench_tcp
 target_link_libraries(bench_tcp
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
@@ -36,6 +37,7 @@ add_executable(bench_tcp_whole
 target_link_libraries(bench_tcp_whole
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
@@ -44,17 +46,24 @@ target_compile_features(bench_tcp_whole
         cxx_std_23
 )
 
-add_executable(bench_tcp_blocks
-    bench_tcp_blocks.cpp
+# --- framed benchmark (scenario "framed", replaces old "blocks") -----------
+add_executable(bench_tcp_framed
+    bench_tcp_framed.cpp
 )
 
-target_link_libraries(bench_tcp_blocks
+target_include_directories(bench_tcp_framed
+    PRIVATE
+        ${TLS_COMMON_DIR}
+)
+
+target_link_libraries(bench_tcp_framed
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 
-target_compile_features(bench_tcp_blocks
+target_compile_features(bench_tcp_framed
     PRIVATE
         cxx_std_23
 )
@@ -66,6 +75,7 @@ add_executable(bench_udp
 target_link_libraries(bench_udp
     PRIVATE
         AsyncBerk::asyncberk
+        Threads::Threads
         benchmark::benchmark
 )
 

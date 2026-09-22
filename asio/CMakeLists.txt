@@ -38,6 +38,7 @@ find_package(OpenSSL REQUIRED)
 set(TLS_COMMON_DIR "${PROJECT_SOURCE_DIR}/../tls")
 
 add_subdirectory(tcpserver)
+add_subdirectory(tcpserver_framed)
 add_subdirectory(tcpserver_tls)
 add_subdirectory(tcpserver_tls_framed)
 add_subdirectory(tcpclient)

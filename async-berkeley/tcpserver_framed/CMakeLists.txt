@@ -1,14 +1,14 @@
-add_executable(tcpserver
+add_executable(tcpserver_framed
     server.cpp
 )
 
-target_link_libraries(tcpserver
+target_link_libraries(tcpserver_framed
     PRIVATE
         AsyncBerk::asyncberk
         Threads::Threads
 )
 
-target_compile_features(tcpserver
+target_compile_features(tcpserver_framed
     PRIVATE
         cxx_std_23
 )

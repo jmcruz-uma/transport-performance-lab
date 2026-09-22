@@ -103,12 +103,13 @@ PDF_RESULTS = MAIN_PDF_WITH_RAW
 COMPARISON_PDF_RESULTS = COMPARISON_PDF_WITH_RAW
 
 # =========================
-# SCENARIOS (E0 streaming / E1 whole_object / E3 blocks / E4 udp_k64,k1400)
+# SCENARIOS (E0 streaming / E1 whole_object / E3 framed / E4 udp_k64,k1400)
 # =========================
 CURRENT_SCENARIO = None
 SERVER_DIR = "tcpserver"
 BENCH_NAME = "bench_tcp"
 SCENARIO_ENV = {}
+IS_UDP_SCENARIO = False
 
 
 def _child_env():
@@ -130,7 +131,7 @@ def _maybe_netns_wrap(cmd):
 
 def _activate_scenario(name):
     """Rebind the scenario-dependent module globals before a scenario's campaign."""
-    global CURRENT_SCENARIO, SERVER_DIR, BENCH_NAME, SCENARIO_ENV
+    global CURRENT_SCENARIO, SERVER_DIR, BENCH_NAME, SCENARIO_ENV, IS_UDP_SCENARIO
     global MACRO_BENCH_CASES, SERVER_THREADS
     global RESULTS_DIR, RAW_DIR, PLOTS_DIR, REPORTS_DIR, LOGS_DIR
     global FINAL_RESULTS, SUMMARY_RESULTS, CSV_RESULTS
@@ -141,6 +142,7 @@ def _activate_scenario(name):
     spec = SCENARIOS[name]
     CURRENT_SCENARIO = name
     SERVER_DIR = spec["server"]
+    IS_UDP_SCENARIO = (SERVER_DIR == "udpserver")
     BENCH_NAME = spec["bench"]
     SCENARIO_ENV = dict(spec.get("env", {}))
     MACRO_BENCH_CASES = list(spec["cases"])
@@ -372,6 +374,37 @@ def is_port_open(host, port, timeout=0.5):
         return False
 
 
+def is_udp_server_ready(pid, port):
+    """UDP has no handshake, so neither a plain TCP connect (always fails
+    against a UDP socket) nor a UDP 'connect' (always succeeds locally,
+    even with nobody listening) can tell us the server is up. Read the
+    bound local ports straight out of /proc/<pid>/net/udp{,6} instead --
+    namespace-correct by construction (reads exactly that process's own
+    namespace view, whether it's still in the root ns or `ip netns exec`
+    moved it into the D7 topology's netns) and needs no protocol-level
+    probe. Found 2026-09-18: every udp_k64/udp_k1400 run in the first real
+    campaign timed out and was counted as a failure because wait_for_server
+    used is_port_open() unconditionally -- the udpserver process itself was
+    fine the whole time, only the readiness check was wrong for UDP."""
+    for proto_file in ("udp", "udp6"):
+        try:
+            with open(f"/proc/{pid}/net/{proto_file}") as f:
+                next(f, None)  # header line
+                for line in f:
+                    fields = line.split()
+                    if len(fields) < 2:
+                        continue
+                    local_hex_port = fields[1].rsplit(":", 1)[-1]
+                    try:
+                        if int(local_hex_port, 16) == port:
+                            return True
+                    except ValueError:
+                        continue
+        except OSError:
+            continue
+    return False
+
+
 
 def can_bind_port(host, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -545,7 +578,8 @@ def wait_for_server(proc, host, port, compiler, server_threads, timeout=SERVER_W
                 f"--- STDERR ---\n{stderr_text}"
             )
 
-        if is_port_open(host, port):
+        ready = is_udp_server_ready(proc.pid, port) if IS_UDP_SCENARIO else is_port_open(host, port)
+        if ready:
             return True
 
         time.sleep(0.2)
