@@ -44,9 +44,18 @@ status() {
 
 log() { printf '\n[%s] ===== %s =====\n' "$(date '+%H:%M:%S')" "$*"; }
 
+# ntfy.sh notification so the campaign can be watched without a terminal
+# attached. Best-effort only -- `|| true` so a network hiccup here never
+# masks the real stage failure or trips the ERR trap again.
+NTFY_TOPIC="jmcruz-taps"
+notify() {
+    curl -s -m 10 -d "$1" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1 || true
+}
+
 on_error() {
     status "FAILED" "stage '$CURRENT_STAGE' failed -- see $LOG_FILE"
     log "ABORTED at stage: $CURRENT_STAGE"
+    notify "❌ transport-performance-lab: FALLO en stage '$CURRENT_STAGE' -- ver $LOG_FILE"
     echo "See the tail of the log above for the actual error."
     echo "Nothing after this stage ran. Fix the problem, then rerun"
     echo "./run_everything.sh -- every stage (build, run.sh, the netem sweep,"
@@ -183,6 +192,7 @@ main() {
 
     log "ALL STAGES COMPLETE"
     status "DONE" "finished at $(date '+%Y-%m-%d %H:%M:%S') -- log: $LOG_FILE"
+    notify "✅ transport-performance-lab: campaña D7 terminada OK ($(date '+%Y-%m-%d %H:%M:%S'))"
 }
 
 main "$@"
