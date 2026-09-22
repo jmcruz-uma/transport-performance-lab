@@ -240,6 +240,7 @@ int main(int argc, char* argv[]) {
         corosio::io_context ctx;
         corosio::tcp_acceptor acceptor(ctx);
         acceptor.open(corosio::tcp::v4());
+        acceptor.set_option(corosio::socket_option::reuse_address(true));
 
         if (auto bind_ec = acceptor.bind(corosio::endpoint(static_cast<std::uint16_t>(port)))) {
             std::cerr << "bind: " << bind_ec.message() << "\n";
