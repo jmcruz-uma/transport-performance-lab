@@ -215,21 +215,34 @@ netem_clear_link() {
 # Pings across the veth link (root ns -> namespace IP), not loopback.
 netem_verify_rtt() {
     local target_rtt_ms="$1" tolerance_ms="${2:-2}"
-    local measured
-    measured="$(ping -c 5 -q "$VETH_PEER_IP" 2>/dev/null | grep rtt | awk -F'/' '{print $5}')"
-    if [ -z "$measured" ]; then
-        echo "[netem] Error: could not measure RTT with ping to $VETH_PEER_IP" >&2
-        echo "[netem] Is the namespace topology up? (netns_setup)" >&2
-        exit 1
-    fi
-    _netem_log "Requested RTT=${target_rtt_ms}ms, measured (ping avg to $VETH_PEER_IP)=${measured}ms"
-    python3 -c "
+    local measured attempt
+
+    # 20 samples (not 5) so one transient blip (ARP resolution right after
+    # the veth pair is created, a momentary scheduling hiccup) can't swing
+    # the average past a tight tolerance on its own -- confirmed 2026-09-22:
+    # a single +50ms outlier among 5 pings shifted the average by +10ms and
+    # wrongly aborted an otherwise correctly-shaped RTT=50ms link. One retry
+    # on top, since a genuinely mis-shaped link will fail again but a
+    # one-off transient won't.
+    for attempt in 1 2; do
+        measured="$(ping -c 20 -q "$VETH_PEER_IP" 2>/dev/null | grep rtt | awk -F'/' '{print $5}')"
+        if [ -z "$measured" ]; then
+            echo "[netem] Error: could not measure RTT with ping to $VETH_PEER_IP" >&2
+            echo "[netem] Is the namespace topology up? (netns_setup)" >&2
+            exit 1
+        fi
+        _netem_log "Requested RTT=${target_rtt_ms}ms, measured (ping avg of 20 to $VETH_PEER_IP, attempt $attempt/2)=${measured}ms"
+        if python3 -c "
 import sys
 target, measured, tol = float('$target_rtt_ms'), float('$measured'), float('$tolerance_ms')
 sys.exit(0 if abs(measured - target) <= tol else 1)
-" || {
-        echo "[netem] Error: measured RTT (${measured}ms) is more than ${tolerance_ms}ms away from the target (${target_rtt_ms}ms)." >&2
-        echo "[netem] Aborting this sweep point rather than recording a mislabelled result." >&2
-        exit 1
-    }
+"; then
+            return 0
+        fi
+        [ "$attempt" -eq 1 ] && sleep 2
+    done
+
+    echo "[netem] Error: measured RTT (${measured}ms) is more than ${tolerance_ms}ms away from the target (${target_rtt_ms}ms), even after a retry." >&2
+    echo "[netem] Aborting this sweep point rather than recording a mislabelled result." >&2
+    exit 1
 }
