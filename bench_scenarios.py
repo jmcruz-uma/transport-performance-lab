@@ -40,7 +40,7 @@ from pathlib import Path
 #   server / bench: basename under build-<compiler>/<server>/<server> and
 #                   build-<compiler>/benchmarks/<bench>
 #   env:            extra environment for both the server and the bench processes
-_TCP_GRID = dict(cases=[1, 2, 4, 8, 16], threads=[1, 2, 4, 8])
+_TCP_GRID = dict(cases=[1, 4, 16], threads=[1, 2, 4, 8])
 _UDP_GRID = dict(cases=[1, 2, 4, 8], threads=[1, 2, 4])
 
 # The tls / tls_framed scenarios add a TLS 1.3 record layer to the streaming and

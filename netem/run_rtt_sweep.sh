@@ -63,8 +63,8 @@ ROOT_DIR="$(dirname "$HERE")"
 # shellcheck source=./netem_common.sh
 source "$HERE/netem_common.sh"
 
-NETEM_RTTS_MS="${NETEM_RTTS_MS:-0 1 5 10 20 50}"
-NETEM_LOSS_PCT="${NETEM_LOSS_PCT:-0 0.1 1 5}"
+NETEM_RTTS_MS="${NETEM_RTTS_MS:-0 1 10 50}"
+NETEM_LOSS_PCT="${NETEM_LOSS_PCT:-0 1 5}"
 # Every scenario bench_scenarios.py defines. Keep this list in sync with that
 # file's SCENARIOS dict if a scenario is ever added/renamed there.
 NETEM_SCENARIOS="${NETEM_SCENARIOS:-streaming whole_object blocks tls tls_framed udp_k64 udp_k1400}"
