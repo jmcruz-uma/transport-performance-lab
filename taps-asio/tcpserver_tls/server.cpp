@@ -152,6 +152,9 @@ static asio::awaitable<void> serve_client(
             print_tls_identity(*connection, "server");
         }
         co_await send_file(*connection, payload);
+        // close() sends TLS close_notify; destroying the connection alone would not, and the
+        // client could not tell a complete transfer from a truncated one.
+        co_await connection->close();
     } catch (const std::exception& e) {
         std::cerr << "serve_client exception: " << e.what() << "\n";
     } catch (...) {
