@@ -45,7 +45,9 @@ PORTS = {
     "clang": 8121,
 }
 
-COMPILERS = ["gcc"]  # clang dropped to fit D7 in ~4-5 days; baseline showed <3% gcc/clang delta
+# Both compilers by default. The D7 sweep (netem/run_rtt_sweep.sh) narrows this through
+# RUN_COMPILERS to fit its time budget.
+COMPILERS = os.environ.get("RUN_COMPILERS", "gcc clang").split()
 
 FILE_TO_SERVE = "../files/100MB.bin"
 # Overridden by the D7 netem/netns sweep (netem/run_rtt_sweep.sh) so the server

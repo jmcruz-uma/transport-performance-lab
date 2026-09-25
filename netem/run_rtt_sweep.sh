@@ -70,6 +70,10 @@ NETEM_LOSS_PCT="${NETEM_LOSS_PCT:-0 1 5}"
 NETEM_SCENARIOS="${NETEM_SCENARIOS:-streaming whole_object framed tls tls_framed udp_k64 udp_k1400}"
 NETEM_PROJECTS="${NETEM_PROJECTS:-asio taps-asio async-berkeley bsd-sockets capy-corosio}"
 NETEM_RTT_TOLERANCE_MS="${NETEM_RTT_TOLERANCE_MS:-2}"
+# The sweep measures one compiler and fewer TCP client levels than the loopback
+# campaign, to fit its time budget. Passed to run_bench.py / bench_scenarios.py.
+NETEM_COMPILERS="${NETEM_COMPILERS:-gcc}"
+NETEM_TCP_CASES="${NETEM_TCP_CASES:-1 4 16}"
 DRY_RUN="${DRY_RUN:-}"
 
 MANIFEST_DIR="$ROOT_DIR/results_netem"
@@ -215,7 +219,8 @@ run_point() {
         # possibly days of measurement, over one bad combination. Recorded
         # and reported at the end instead; this point/project's own results
         # (if partial) are still collected by relocate_results below.
-        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$reps_override" python3 scripts/run_bench.py ); then
+        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$reps_override" \
+                RUN_COMPILERS="$NETEM_COMPILERS" TCP_CASES="$NETEM_TCP_CASES" python3 scripts/run_bench.py ); then
             log "ERROR: run_bench.py failed for $project_dir at RTT=${rtt_ms}ms loss=${loss_pct}% -- see the traceback above."
             log "Continuing with the remaining projects/grid points instead of losing the rest of the sweep."
             SWEEP_FAILURES+=("$project_dir @ RTT=${rtt_ms}ms loss=${loss_pct}%")
