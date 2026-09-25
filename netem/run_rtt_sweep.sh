@@ -84,6 +84,15 @@ log() {
     printf '\n[%s] [netem-sweep] %s\n' "$(date '+%H:%M:%S')" "$*"
 }
 
+# Same ntfy.sh topic run_everything.sh notifies on -- this script is also run
+# standalone sometimes, so it carries its own copy rather than depending on
+# being sourced by run_everything.sh. Best-effort: `|| true` so a network
+# hiccup here never aborts a grid point.
+NTFY_TOPIC="jmcruz-taps"
+notify() {
+    curl -s -m 10 -d "$1" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1 || true
+}
+
 cleanup() {
     log "Cleaning up: tearing down the netns+veth topology"
     netem_clear_link || true
@@ -158,9 +167,9 @@ capture_tcp_environment() {
 }
 
 run_point() {
-    local rtt_ms="$1" loss_pct="$2"
+    local rtt_ms="$1" loss_pct="$2" point_index="$3" total_points="$4"
 
-    log "===== Grid point: RTT=${rtt_ms}ms loss=${loss_pct}% ====="
+    log "===== Grid point: RTT=${rtt_ms}ms loss=${loss_pct}% (${point_index}/${total_points}) ====="
 
     if [ -n "$DRY_RUN" ]; then
         log "[DRY_RUN] would set RTT=${rtt_ms}ms loss=${loss_pct}%, run scenarios [$NETEM_SCENARIOS]" \
@@ -218,6 +227,9 @@ run_point() {
     done
 
     netem_clear_link
+
+    local fail_count="${#SWEEP_FAILURES[@]}"
+    notify "🔄 D7 punto ${point_index}/${total_points} completado: RTT=${rtt_ms}ms loss=${loss_pct}% -- ${fail_count} fallo(s) de proyecto acumulados en total"
 }
 
 main() {
@@ -233,9 +245,12 @@ main() {
         netns_setup
     fi
 
+    local total_points=$(( $(echo $NETEM_RTTS_MS | wc -w) * $(echo $NETEM_LOSS_PCT | wc -w) ))
+    local point_index=0
     for rtt_ms in $NETEM_RTTS_MS; do
         for loss_pct in $NETEM_LOSS_PCT; do
-            run_point "$rtt_ms" "$loss_pct"
+            point_index=$((point_index + 1))
+            run_point "$rtt_ms" "$loss_pct" "$point_index" "$total_points"
         done
     done
 

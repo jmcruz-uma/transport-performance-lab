@@ -188,20 +188,23 @@ SERVER_STOP_TIMEOUT_SECONDS = 5.0
 PORT_RETRY_SPAN = 200
 # Found 2026-09-15 auditing the harness ahead of the real-machine deployment:
 # the bench client wait below used to be an unbounded proc.wait() -- a single
-# hung client (plausible under severe netem loss/RTT, or corosio's documented
-# TLS slowness compounding with it) would silently stall the ENTIRE campaign
-# forever, with nothing left to notice for days. Bounded here instead: a
-# repetition that doesn't finish in time is killed and counted as failed
-# (parse_benchmark_json already treats a missing/invalid output file as
-# `failed`, so this needs no other downstream change), and the campaign moves
-# on. 600s (this constant's original value) turned out NOT generous enough:
-# a calibration probe on 2026-09-22 (RTT=50ms/loss=5%, case=1, no
-# contention -- the actual worst case, not the highest-parallelism one)
-# measured a legitimately-completing transfer take 2326s. Raised to 4200s
-# (~1.8x that) instead of assuming case=1 was the true ceiling; still
-# override via BENCH_CLIENT_TIMEOUT_SECONDS if a harsher point ever needs
-# more.
-BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "4200"))
+# hung client would silently stall the ENTIRE campaign forever, with nothing
+# left to notice for days. Bounded here instead: a repetition that doesn't
+# finish in time is killed and counted as failed (parse_benchmark_json
+# already treats a missing/invalid output file as `failed`), and the
+# campaign moves on. This constant went 600 -> 4200 and 4200 still wasn't
+# enough: real D7 runs (2026-09-22, 2026-09-25) kept killing a real fraction
+# (~24% at RTT=0/loss=5%) of legitimately-completing repetitions, and killed
+# reps are NOT retried (see the plain `for rep in range(MACRO_REPETITIONS)`
+# loop below) -- every kill both wastes the time already spent AND silently
+# shrinks and biases the sample (the slowest, most informative tail is
+# exactly what gets thrown away). No genuine hang has ever actually been
+# observed across ~9 days of real runs; every "slow" case measured so far
+# has been slow-but-finite. Raised to 28800s (8h, ~12x the worst
+# legitimately-completing case measured, 2326s) so this stops being the
+# thing that decides the sample -- it exists only to catch something
+# actually broken, not to bound how long a real transfer is allowed to take.
+BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "28800"))
 
 # =========================
 # PDF / TABLE TUNING

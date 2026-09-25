@@ -179,6 +179,7 @@ main() {
     log "STAGE 4/6: Baseline campaign -- every scenario, loopback (RTT=0, no netem)"
     status "RUNNING" "stage 4/6: baseline campaign (run.sh) -- this is a long one, check campaign_logs/$STAMP/campaign.log for progress"
     "$ROOT_DIR/run.sh"
+    notify "✅ Stage 4/6 (baseline) terminado -- empieza el barrido D7"
 
     CURRENT_STAGE="D7 netem sweep (run_rtt_sweep.sh)"
     log "STAGE 5/6: D7 network-realism sweep -- every scenario x RTT x loss grid (netns+veth)"
