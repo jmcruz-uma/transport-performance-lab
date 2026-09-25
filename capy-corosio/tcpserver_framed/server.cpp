@@ -193,6 +193,7 @@ int main(int argc, char* argv[]) {
             unmap_file(mapping);
             return EXIT_FAILURE;
         }
+        acceptor.set_option(corosio::socket_option::reuse_address(true));
 
         if (auto bind_ec = acceptor.bind(corosio::endpoint(static_cast<std::uint16_t>(port)))) {
             std::cerr << "bind: " << bind_ec.message() << "\n";
