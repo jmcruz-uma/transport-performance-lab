@@ -26,16 +26,22 @@
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <memory_resource>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -47,6 +53,52 @@ constexpr int MAX_THREADS = 256;
 // 65507 = 65535 - 8 (UDP header) - 20 (IPv4 header): the true max IPv4 UDP
 // payload a single send() can carry; anything above it fails.
 constexpr std::size_t DEFAULT_DGRAM_BYTES = 65507;
+
+struct FileMapping {
+    int fd = -1;
+    const char* data = nullptr;
+    std::size_t size = 0;
+};
+
+static FileMapping map_file_read_only(const fs::path& path) {
+    FileMapping mapping{};
+
+    const std::uintmax_t file_size = fs::file_size(path);
+    mapping.size = static_cast<std::size_t>(file_size);
+
+    mapping.fd = open(path.c_str(), O_RDONLY);
+    if (mapping.fd == -1) {
+        throw std::runtime_error("Failed to open file: " + path.string());
+    }
+
+    if (mapping.size == 0) {
+        mapping.data = nullptr;
+        return mapping;
+    }
+
+    void* ptr = mmap(nullptr, mapping.size, PROT_READ, MAP_PRIVATE, mapping.fd, 0);
+    if (ptr == MAP_FAILED) {
+        close(mapping.fd);
+        throw std::runtime_error("mmap failed.");
+    }
+
+    mapping.data = static_cast<const char*>(ptr);
+    return mapping;
+}
+
+static void unmap_file(FileMapping& mapping) {
+    if (mapping.data != nullptr && mapping.size > 0) {
+        munmap(const_cast<char*>(mapping.data), mapping.size);
+    }
+
+    if (mapping.fd != -1) {
+        close(mapping.fd);
+    }
+
+    mapping.data = nullptr;
+    mapping.fd = -1;
+    mapping.size = 0;
+}
 
 static std::size_t dgram_bytes() {
     if (const char* s = std::getenv("DGRAM_BYTES")) {
@@ -60,7 +112,7 @@ static std::size_t dgram_bytes() {
 
 static asio::awaitable<void> serve_connection(
     std::unique_ptr<taps::Connection> conn,
-    std::shared_ptr<std::vector<std::uint8_t>> payload,
+    std::span<const std::uint8_t> payload,
     std::size_t dgram_size
 ) {
     // The request datagram's content is irrelevant; receiving it is what
@@ -71,10 +123,10 @@ static asio::awaitable<void> serve_connection(
     }
 
     std::size_t sent = 0;
-    while (sent < payload->size()) {
-        const std::size_t n = std::min(dgram_size, payload->size() - sent);
+    while (sent < payload.size()) {
+        const std::size_t n = std::min(dgram_size, payload.size() - sent);
         auto view = taps::make_message_view(
-            std::span<const std::uint8_t>(payload->data() + sent, n));
+            std::span<const std::uint8_t>(payload.data() + sent, n));
         auto r = co_await conn->send(view);
         if (!r) {
             co_return;
@@ -91,7 +143,7 @@ static asio::awaitable<void> serve_connection(
 
 static asio::awaitable<void> accept_loop(
     std::unique_ptr<taps::Listener> listener,
-    std::shared_ptr<std::vector<std::uint8_t>> payload,
+    std::span<const std::uint8_t> payload,
     std::size_t dgram_size
 ) {
     auto executor = co_await asio::this_coro::executor;
@@ -109,7 +161,7 @@ static asio::awaitable<void> accept_loop(
 
 static asio::awaitable<void> run_server(
     asio::io_context& io_context, std::pmr::memory_resource* message_memory, int port,
-    std::shared_ptr<std::vector<std::uint8_t>> payload,
+    std::span<const std::uint8_t> payload,
     std::size_t dgram_size
 ) {
     taps::TransportServices ts(io_context, taps::MessageMemoryConfig{message_memory});
@@ -157,11 +209,15 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    auto payload = std::make_shared<std::vector<std::uint8_t>>();
-    {
-        std::ifstream in(file_path, std::ios::binary);
-        payload->assign(std::istreambuf_iterator<char>(in), {});
+    FileMapping mapping{};
+    try {
+        mapping = map_file_read_only(file_path);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return EXIT_FAILURE;
     }
+    const std::span<const std::uint8_t> payload(
+        reinterpret_cast<const std::uint8_t*>(mapping.data), mapping.size);
 
     const std::size_t dgram_size = dgram_bytes();
 
@@ -184,5 +240,6 @@ int main(int argc, char* argv[]) {
         worker.join();
     }
 
+    unmap_file(mapping);
     return EXIT_SUCCESS;
 }
