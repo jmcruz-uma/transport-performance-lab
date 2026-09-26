@@ -77,6 +77,12 @@ LOGS_DIR = RESULTS_DIR / "logs"
 MACRO_BENCH_CASES = [1, 2, 4, 8, 16]
 SERVER_THREADS = [1, 2, 4, 8]
 MACRO_REPETITIONS = int(os.environ.get("MACRO_REPETITIONS", "25"))
+# Each case first runs WARMUP_REPETITIONS extra repetitions, recorded in the raw
+# results with "warmup": true but left out of the statistics and plots: the case
+# starts cold (fresh server or trashed caches, first touch of the served file), so
+# its first repetition is systematically slower than the rest. MACRO_REPETITIONS
+# is therefore the number of measured repetitions per case.
+WARMUP_REPETITIONS = 1
 
 BENCH_ARGS = [
     "--benchmark_out_format=json"
@@ -178,7 +184,7 @@ PORT_RETRY_SPAN = 200
 # campaign moves on. This constant went 600 -> 4200 and 4200 still wasn't
 # enough: real D7 runs (2026-09-22, 2026-09-25) kept killing a real fraction
 # (~24% at RTT=0/loss=5%) of legitimately-completing repetitions, and killed
-# reps are NOT retried (see the plain `for rep in range(MACRO_REPETITIONS)`
+# reps are NOT retried (see the plain `for rep in range(...)` repetition
 # loop below) -- every kill both wastes the time already spent AND silently
 # shrinks and biases the sample (the slowest, most informative tail is
 # exactly what gets thrown away). No genuine hang has ever actually been
@@ -818,6 +824,7 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
         "server_threads": server_threads,
         "parallel_bench_processes": num_benches,
         "repetition": repetition,
+        "warmup": repetition < WARMUP_REPETITIONS,
         "success": success,
         "failed": failed,
         "total_iterations": total_iterations,
@@ -865,7 +872,7 @@ def run_campaign_for_compiler_and_threads(compiler, server_threads):
             case_level_cache_trash()
             settle_between_cases()
 
-            for rep in range(MACRO_REPETITIONS):
+            for rep in range(WARMUP_REPETITIONS + MACRO_REPETITIONS):
                 log(
                     f"[{compiler}][server_threads={server_threads}] "
                     f"Running {benches} parallel benchmark process(es) on port {actual_port}..."
@@ -979,6 +986,7 @@ def write_csv(results):
         "server_threads",
         "parallel_bench_processes",
         "repetition",
+        "warmup",
         "success",
         "failed",
         "total_iterations",
@@ -1373,7 +1381,8 @@ def generate_main_pdf_report(final_data, summary, results, output_path, include_
             f"Ports: {final_data['ports']}",
             f"Parallel client cases: {final_data['cases']}",
             f"Server thread counts: {final_data['server_threads']}",
-            f"Repetitions per case: {final_data['repetitions']}",
+            f"Repetitions per case: {final_data['repetitions']} measured "
+            f"+ {final_data['warmup_repetitions']} warm-up (repetition 0, not in the statistics)",
             f"Idle power baseline: {IDLE_POWER_W:.6f} W",
             f"Case cooldown: {CASE_COOLDOWN_SECONDS} seconds",
             f"Raw results included: {'yes' if include_raw_results else 'no'}",
@@ -1496,7 +1505,8 @@ def generate_comparison_pdf_report(final_data, summary, results, output_path, in
             f"Served file: {final_data['file_served']}",
             f"Parallel client cases: {final_data['cases']}",
             f"Server thread counts: {final_data['server_threads']}",
-            f"Repetitions per case: {final_data['repetitions']}",
+            f"Repetitions per case: {final_data['repetitions']} measured "
+            f"+ {final_data['warmup_repetitions']} warm-up (repetition 0, not in the statistics)",
         ]
         add_text_page(pdf, "Compiler comparison report", intro_lines, fontsize=11)
 
@@ -1636,6 +1646,7 @@ def _run_one_scenario():
         "cases": MACRO_BENCH_CASES,
         "server_threads": SERVER_THREADS,
         "repetitions": MACRO_REPETITIONS,
+        "warmup_repetitions": WARMUP_REPETITIONS,
         "compilers": COMPILERS,
         "build_dirs": BUILD_DIRS,
         "idle_baseline_json": str(IDLE_BASELINE_JSON),
@@ -1646,7 +1657,8 @@ def _run_one_scenario():
     with open(FINAL_RESULTS, "w") as f:
         json.dump(final, f, indent=4)
 
-    summary = summarize_results(all_results)
+    measured = [r for r in all_results if not r["warmup"]]
+    summary = summarize_results(measured)
 
     with open(SUMMARY_RESULTS, "w") as f:
         json.dump({
@@ -1656,6 +1668,7 @@ def _run_one_scenario():
             "cases": MACRO_BENCH_CASES,
             "server_threads": SERVER_THREADS,
             "repetitions": MACRO_REPETITIONS,
+            "warmup_repetitions": WARMUP_REPETITIONS,
             "compilers": COMPILERS,
             "build_dirs": BUILD_DIRS,
             "idle_baseline_json": str(IDLE_BASELINE_JSON),
@@ -1666,7 +1679,7 @@ def _run_one_scenario():
     write_csv(all_results)
 
     if GENERATE_PLOTS and not DRY_RUN:
-        generate_plots(all_results, summary)
+        generate_plots(measured, summary)
 
     if GENERATE_PDF and not DRY_RUN:
         generate_main_pdf_report(final, summary, all_results, MAIN_PDF_WITH_RAW, include_raw_results=True)
