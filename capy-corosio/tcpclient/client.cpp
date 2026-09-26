@@ -51,7 +51,10 @@ static capy::task<void> run_client(
     ok = false;
 
     corosio::tcp_socket socket(context);
-    socket.open();
+    if (socket.open()) {
+        std::cerr << "open failed\n";
+        co_return;
+    }
 
     auto [connect_ec] = co_await socket.connect(
         corosio::endpoint(

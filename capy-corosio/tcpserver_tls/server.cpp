@@ -180,7 +180,11 @@ int main(int argc, char* argv[]) {
     try {
         corosio::io_context ctx;
         corosio::tcp_acceptor acceptor(ctx);
-        acceptor.open(corosio::tcp::v4());
+        if (auto open_ec = acceptor.open(corosio::tcp::v4())) {
+            std::cerr << "open: " << open_ec.message() << "\n";
+            unmap_file(mapping);
+            return EXIT_FAILURE;
+        }
         acceptor.set_option(corosio::socket_option::reuse_address(true));
 
         if (auto bind_ec = acceptor.bind(corosio::endpoint(static_cast<std::uint16_t>(port)))) {
