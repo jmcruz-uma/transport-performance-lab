@@ -8,12 +8,16 @@
  * framing: sends N discrete messages whose sizes come from the shared manifest
  * (tls/manifest.txt, path in TLS_MANIFEST), each as a 4-byte big-endian length
  * followed by the body. capy::write() (boost/capy/write.hpp) is a composed
- * gather-write over a ConstBufferSequence -- the same shape as
- * asio::async_write(stream, {hdr, body}) -- so each message is ONE
- * co_await capy::write(tls, {header, body}), matching the asio and taps-asio
- * servers exactly; unlike bsd-sockets, which is stuck with two SSL_write calls
- * because raw OpenSSL has no gather write. Wire bytes are byte-for-byte what
- * taps_cpp's LengthPrefixedFramer produces.
+ * gather-write over a ConstBufferSequence, so each message is ONE
+ * co_await capy::write(tls, {header, body}), the same call shape as
+ * asio::async_write(stream, {hdr, body}) in the asio and taps-asio servers.
+ * Below that call the arms differ, because SSL_write takes one contiguous
+ * buffer: corosio's openssl_stream passes each buffer to its own SSL_write, so
+ * the 4-byte header travels in its own TLS record (as in bsd-sockets, which
+ * calls SSL_write twice), with no copy; asio's ssl::stream instead copies the
+ * header and the start of the body (up to 8 KiB) into one buffer, one record.
+ * The plaintext bytes are byte-for-byte what taps_cpp's LengthPrefixedFramer
+ * produces.
  *
  * Comparability note: corosio's portable tls_context pins the protocol version
  * (TLS 1.3), the cipher suite and ALPN, but exposes no named-group knob and no

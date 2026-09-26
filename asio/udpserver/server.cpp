@@ -8,11 +8,12 @@
  * zero-length datagram -- the end-of-transfer sentinel, since UDP has no
  * end-of-stream of its own.
  *
- * All socket operations run on one strand: asio only allows one outstanding
- * async op per direction per socket, and several clients' response streams
- * would otherwise issue concurrent async_send_to() calls on this shared
- * socket. A strand serialises them without needing a socket (or a thread) per
- * client.
+ * All socket operations run on one strand: several clients' response streams
+ * issue async_send_to() calls on this shared socket, and asio does not allow
+ * one socket object to be used from several threads at once ("Shared objects:
+ * Unsafe"; only the synchronous operations are exempt). A strand serialises
+ * those calls without needing a socket (or a thread) per client; each client
+ * still has its own async_send_to() pending, which the socket queues.
  *
  * Deliberately uses the OS's default socket buffer sizes, like every other
  * scenario: any loss it causes at these datagram sizes is a real, comparable

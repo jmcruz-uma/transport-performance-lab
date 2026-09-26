@@ -4,9 +4,11 @@
  * TAPS UDP file server (scenarios "udp_k64"/"udp_k1400", E4).
  * Uses TAPS's own Listener/Connection abstraction (RELIABILITY::AVOID selects
  * UDP): each accept() gives one Connection per detected source, sharing the
- * listener's underlying socket -- the library's own UDPListener already
- * serializes access to it internally, so this file never touches raw sockets
- * or concurrency primitives. On each accepted connection, the whole file is
+ * listener's underlying socket. The library routes each datagram received on
+ * it to its Connection; each Connection sends on it directly, from whichever
+ * thread runs its coroutine, and the library documents what it relies on for
+ * that. This file never touches raw sockets or concurrency primitives. On
+ * each accepted connection, the whole file is
  * sent back as a sequence of datagrams (DGRAM_BYTES, default the max IPv4 UDP
  * payload, 65507 bytes), followed by one empty Message -- the end-of-transfer
  * sentinel, since UDP has no end-of-stream of its own.
