@@ -2,17 +2,22 @@
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
  * Corosio UDP file server (scenarios "udp_k64"/"udp_k1400", E4).
- * One socket, no per-client state: on each request datagram the whole file is
- * streamed back to the requester's address as fixed-size datagrams
- * (DGRAM_BYTES, default the max IPv4 UDP payload, 65507 bytes), followed by a
- * zero-length datagram -- the end-of-transfer sentinel, since UDP has no
- * end-of-stream of its own.
+ * One socket, per client only its address and progress: on each request
+ * datagram the whole file is streamed back to the requester's address as
+ * fixed-size datagrams (DGRAM_BYTES, default the max IPv4 UDP payload, 65507
+ * bytes), followed by a zero-length datagram -- the end-of-transfer sentinel,
+ * since UDP has no end-of-stream of its own.
  *
- * Requests are served one at a time (each response awaited fully before the
- * next recv_from()): Corosio's UDP socket, like Asio's, only documents one
- * outstanding op per direction, and without a confirmed strand-equivalent
- * this is the option that is unconditionally safe rather than merely assumed
- * safe under concurrent send_to() calls.
+ * Clients are served concurrently, interleaved one datagram at a time.
+ * Corosio's UDP socket allows only one send_to() and one recv_from() in
+ * flight at once ("A socket must not have concurrent operations of the same
+ * type"; the socket keeps a single slot per operation type), so one coroutine
+ * per client would not do, even on a strand: two of them could each have a
+ * send_to() pending. Instead one receive loop records each request as an
+ * active transfer, and one send loop walks the active transfers round-robin,
+ * sending the next datagram of each (or its sentinel, which ends it). The two
+ * loops may run on different threads; a mutex guards the list of transfers,
+ * never held across an await.
  *
  * Deliberately uses the OS's default socket buffer sizes, like every other
  * scenario: any loss it causes at these datagram sizes is a real, comparable
@@ -43,6 +48,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -109,37 +115,74 @@ static std::size_t dgram_bytes() {
     return DEFAULT_DGRAM_BYTES;
 }
 
-static capy::task<void> send_to_client(
-    corosio::udp_socket& sock, corosio::endpoint client,
-    std::span<const char> payload, std::size_t dgram_size
-) {
+// One client's transfer in progress: where to send and how much has been sent.
+struct Transfer {
+    corosio::endpoint client;
     std::size_t sent = 0;
-    while (sent < payload.size()) {
-        const std::size_t n = std::min(dgram_size, payload.size() - sent);
-        auto [ec, sn] = co_await sock.send_to(
-            capy::const_buffer(payload.data() + sent, n), client);
-        if (ec || sn == 0) {
-            co_return;
+};
+
+// State shared by the receive and send loops.
+struct Server {
+    corosio::udp_socket& sock;
+    corosio::io_context::executor_type ex;
+    std::mutex mutex;       // guards active and sending
+    std::span<const char> payload;
+    std::size_t dgram_size;
+    std::vector<Transfer> active;
+    bool sending = false;   // send_loop is running
+};
+
+// Sends one datagram per active transfer in turn until none is left. A
+// transfer ends after its zero-length sentinel, or when a send fails.
+static capy::task<void> send_loop(Server& s) {
+    std::size_t next = 0;
+    for (;;) {
+        corosio::endpoint client;
+        std::size_t offset;
+        {
+            std::lock_guard lock(s.mutex);
+            if (s.active.empty()) {
+                s.sending = false;
+                co_return;
+            }
+            if (next >= s.active.size()) {
+                next = 0;
+            }
+            client = s.active[next].client;
+            offset = s.active[next].sent;
         }
-        sent += static_cast<std::size_t>(sn);
+        const std::size_t n = std::min(s.dgram_size, s.payload.size() - offset);
+        auto [ec, sn] = co_await s.sock.send_to(
+            capy::const_buffer(s.payload.data() + offset, n), client);
+        std::lock_guard lock(s.mutex);
+        if (n == 0 || ec || sn == 0) {
+            s.active.erase(s.active.begin() + static_cast<std::ptrdiff_t>(next));
+            continue;
+        }
+        s.active[next].sent += static_cast<std::size_t>(sn);
+        ++next;
     }
-    // Zero-length datagram: end-of-transfer sentinel.
-    co_await sock.send_to(capy::const_buffer(payload.data(), 0), client);
-    co_return;
 }
 
-static capy::task<void> serve_loop(
-    corosio::udp_socket& sock, std::span<const char> payload, std::size_t dgram_size
-) {
+static capy::task<void> serve_loop(Server& s) {
     std::array<char, 64> request{};
     for (;;) {
         corosio::endpoint client;
-        auto [ec, n] = co_await sock.recv_from(
+        auto [ec, n] = co_await s.sock.recv_from(
             capy::mutable_buffer(request.data(), request.size()), client);
         if (ec) {
             continue;
         }
-        co_await send_to_client(sock, client, payload, dgram_size);
+        bool start = false;
+        {
+            std::lock_guard lock(s.mutex);
+            s.active.push_back(Transfer{client});
+            start = !s.sending;
+            s.sending = true;
+        }
+        if (start) {
+            capy::run_async(s.ex)(send_loop(s));
+        }
     }
 }
 
@@ -208,9 +251,8 @@ int main(int argc, char* argv[]) {
             return EXIT_FAILURE;
         }
 
-        capy::run_async(ctx.get_executor())(
-            serve_loop(sock, payload, dgram_size)
-        );
+        Server server{sock, ctx.get_executor(), {}, payload, dgram_size, {}};
+        capy::run_async(server.ex)(serve_loop(server));
 
         std::vector<std::thread> pool;
         pool.reserve(static_cast<std::size_t>(threads));
