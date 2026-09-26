@@ -37,21 +37,21 @@ target_link_libraries(bench_tcp
         Threads::Threads
 )
 
-add_executable(bench_tcp_whole bench_tcp_whole.cpp)
+add_executable(bench_tcp_whole_transfer bench_tcp_whole_transfer.cpp)
 
-target_compile_features(bench_tcp_whole PRIVATE cxx_std_23)
+target_compile_features(bench_tcp_whole_transfer PRIVATE cxx_std_23)
 
-target_compile_definitions(bench_tcp_whole
+target_compile_definitions(bench_tcp_whole_transfer
     PRIVATE
         ASIO_STANDALONE
 )
 
-target_include_directories(bench_tcp_whole
+target_include_directories(bench_tcp_whole_transfer
     PRIVATE
         ${ASIO_INCLUDE_DIR}
 )
 
-target_link_libraries(bench_tcp_whole
+target_link_libraries(bench_tcp_whole_transfer
     PRIVATE
         benchmark::benchmark
         benchmark::benchmark_main

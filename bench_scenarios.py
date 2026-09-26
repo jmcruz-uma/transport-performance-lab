@@ -5,10 +5,11 @@ repetitions) matrix: the SCENARIO. All four run in a single `run.sh` invocation;
 nothing to toggle by hand.
 
   streaming     E0  the published model: the client reads the byte-stream as it
-                    arrives (read loop, no whole-object materialisation). Wire is
-                    raw-until-close; the server is `tcpserver`.
-  whole_object  E1  the client receives the transfer as ONE object, materialised
-                    contiguously. Non-TAPS: accumulate into one growing buffer.
+                    arrives (read loop, the transfer is never held whole). Wire
+                    is raw-until-close; the server is `tcpserver`.
+  whole_transfer
+                E1  the client receives the whole transfer as ONE contiguous
+                    buffer. Non-TAPS: accumulate into one growing buffer.
                     TAPS: PassthroughFramer(gather=true) -> one receive() ->
                     as_bytes().
   framed        E3  length-prefixed application framing, NO security layer --
@@ -35,7 +36,7 @@ nothing to toggle by hand.
                     it), 5-way.
   udp_k1400     E4  same, ~MTU-sized datagrams.
 
-Same wire for streaming / whole_object (raw-until-close), so they share
+Same wire for streaming / whole_transfer (raw-until-close), so they share
 `tcpserver`. "framed" has its own wire (length-prefixed messages, no security)
 and its own server, `tcpserver_framed`, mirroring "tls_framed"'s
 `tcpserver_tls_framed` minus the TLS record layer. Per-scenario grid / target
@@ -91,7 +92,7 @@ _TLS_ENV = {"TLS_CERT": "../tls/server.crt",
 
 SCENARIOS = {
     "streaming":    dict(server="tcpserver", bench="bench_tcp",        **_TCP_GRID),
-    "whole_object": dict(server="tcpserver", bench="bench_tcp_whole",  **_TCP_GRID),
+    "whole_transfer": dict(server="tcpserver", bench="bench_tcp_whole_transfer",  **_TCP_GRID),
     "framed":       dict(server="tcpserver_framed", bench="bench_tcp_framed",
                          env={"MANIFEST": _MANIFEST}, **_TCP_GRID),
     "tls":          dict(server="tcpserver_tls", bench="bench_tcp_tls",

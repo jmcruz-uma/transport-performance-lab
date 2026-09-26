@@ -20,11 +20,11 @@ target_link_libraries(bench_tcp PRIVATE benchmark::benchmark benchmark::benchmar
 
 target_compile_features(bench_tcp PRIVATE cxx_std_23)
 
-add_executable(bench_tcp_whole bench_tcp_whole.cpp)
+add_executable(bench_tcp_whole_transfer bench_tcp_whole_transfer.cpp)
 
-target_link_libraries(bench_tcp_whole PRIVATE benchmark::benchmark benchmark::benchmark_main Threads::Threads)
+target_link_libraries(bench_tcp_whole_transfer PRIVATE benchmark::benchmark benchmark::benchmark_main Threads::Threads)
 
-target_compile_features(bench_tcp_whole PRIVATE cxx_std_23)
+target_compile_features(bench_tcp_whole_transfer PRIVATE cxx_std_23)
 
 # --- framed benchmark (scenario "framed", replaces old "blocks") -----------
 add_executable(bench_tcp_framed bench_tcp_framed.cpp)

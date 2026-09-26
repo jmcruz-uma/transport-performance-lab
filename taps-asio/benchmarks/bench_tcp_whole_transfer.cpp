@@ -1,8 +1,8 @@
 /*
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
- * TAPS raw-byte file download benchmark, WHOLE-OBJECT model (scenario
- * "whole_object", E1). PassthroughFramer(gather=true): the whole connection is
+ * TAPS raw-byte file download benchmark, WHOLE-TRANSFER model (scenario
+ * "whole_transfer", E1). PassthroughFramer(gather=true): the whole connection is
  * one Message (RFC 9623 5.2/6.1), gathered into one contiguous buffer before
  * delivery, so as_bytes() is a free view for the app.
  */
@@ -56,7 +56,7 @@ static asio::awaitable<std::unique_ptr<taps::Connection>> connect_to_server(
     co_return std::move(*connection_result);
 }
 
-static asio::awaitable<std::uint64_t> receive_whole_object(
+static asio::awaitable<std::uint64_t> receive_whole_transfer(
     asio::io_context& io_context,
     const char* ip,
     int port
@@ -105,7 +105,7 @@ static bool run_benchmark_download(
 
     auto result = asio::co_spawn(
         io_context,
-        receive_whole_object(io_context, ip, port),
+        receive_whole_transfer(io_context, ip, port),
         asio::use_future
     );
 
@@ -115,7 +115,7 @@ static bool run_benchmark_download(
     return downloaded_bytes > 0;
 }
 
-static void BM_TCP_WholeObject(benchmark::State& state) {
+static void BM_TCP_WholeTransfer(benchmark::State& state) {
     const char* ip = g_server_ip.c_str();
     const int port = g_port;
 
@@ -146,7 +146,7 @@ static void BM_TCP_WholeObject(benchmark::State& state) {
     state.counters["downloaded_bytes"] = static_cast<double>(last_downloaded_bytes);
 }
 
-BENCHMARK(BM_TCP_WholeObject)
+BENCHMARK(BM_TCP_WholeTransfer)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1)
     ->UseRealTime();

@@ -30,18 +30,18 @@ target_compile_features(bench_tcp
         cxx_std_23
 )
 
-add_executable(bench_tcp_whole
-    bench_tcp_whole.cpp
+add_executable(bench_tcp_whole_transfer
+    bench_tcp_whole_transfer.cpp
 )
 
-target_link_libraries(bench_tcp_whole
+target_link_libraries(bench_tcp_whole_transfer
     PRIVATE
         AsyncBerk::asyncberk
         Threads::Threads
         benchmark::benchmark
 )
 
-target_compile_features(bench_tcp_whole
+target_compile_features(bench_tcp_whole_transfer
     PRIVATE
         cxx_std_23
 )

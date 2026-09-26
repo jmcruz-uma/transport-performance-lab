@@ -417,7 +417,7 @@ run_project_once() {
 # before relocate_results moved it to its __netem_rtt_... name, that
 # scenario's netem-shaped result is left at the plain path WITH a valid
 # "done" checkpoint -- silently mislabelling shaped data as the loopback
-# baseline (hit for real: async-berkeley's streaming/whole_object).
+# baseline (hit for real: async-berkeley's streaming/whole_transfer).
 restore_preexisting_backups() {
   local project_dir full_dir backup scenario plain results_json host mislabelled
   local -A latest_backup
@@ -535,9 +535,9 @@ build_master_tables() {
     # 2026-09-18, see is_udp_server_ready in the 5 run_bench.py files). An
     # unguarded call here would abort this whole loop right there under
     # set -e, silently dropping the master table for every alphabetically
-    # LATER label too -- confirmed this is exactly why whole_object's master
+    # LATER label too -- confirmed this is exactly why whole_transfer's master
     # table went missing that run despite its per-project data being
-    # complete and sitting right there in $SUMMARIES_DIR/whole_object/: it
+    # complete and sitting right there in $SUMMARIES_DIR/whole_transfer/: it
     # sorts after udp_k64, so the loop never reached it. One broken scenario
     # must not cost every other, unrelated scenario its comparison table.
     if ! python3 "$script" \

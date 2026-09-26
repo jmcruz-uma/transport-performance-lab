@@ -1,10 +1,11 @@
 /*
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
- * async-berkeley, WHOLE-OBJECT model (scenario "whole_object", E1).
- * The client receives the transfer as ONE object: it accumulates every byte into
- * a single growing buffer (geometric growth), so at end-of-stream the buffer IS
- * the object. No length prefix on the wire (raw-until-close), same as streaming.
+ * async-berkeley, WHOLE-TRANSFER model (scenario "whole_transfer", E1).
+ * The client receives the whole transfer as ONE contiguous buffer: it accumulates
+ * every byte into a single growing buffer (geometric growth), so at end-of-stream
+ * the buffer holds the whole transfer. No length prefix on the wire
+ * (raw-until-close), same as streaming.
  * This is the cost of "hand me the whole thing" for a minimal buffer API.
  *
  * Each recvmsg still reads into a small reused scratch chunk (the sender-based
@@ -144,7 +145,7 @@ static bool run_benchmark_client(
     return !state->failed && total_bytes > 0;
 }
 
-static void BM_TCP_WholeObject(benchmark::State& state) {
+static void BM_TCP_WholeTransfer(benchmark::State& state) {
     const char* ip = g_server_ip.c_str();
     const int port = g_port;
 
@@ -169,7 +170,7 @@ static void BM_TCP_WholeObject(benchmark::State& state) {
     state.counters["downloaded_bytes"] = static_cast<double>(last_downloaded_bytes);
 }
 
-BENCHMARK(BM_TCP_WholeObject)
+BENCHMARK(BM_TCP_WholeTransfer)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1)
     ->UseRealTime();

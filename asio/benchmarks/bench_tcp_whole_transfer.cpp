@@ -1,10 +1,11 @@
 /*
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
- * Asio, WHOLE-OBJECT model (scenario "whole_object", E1).
- * The client receives the transfer as ONE object: it accumulates every byte into
- * a single growing buffer (geometric growth), so at end-of-stream the buffer IS
- * the object. No length prefix on the wire (raw-until-close), same as streaming.
+ * Asio, WHOLE-TRANSFER model (scenario "whole_transfer", E1).
+ * The client receives the whole transfer as ONE contiguous buffer: it accumulates
+ * every byte into a single growing buffer (geometric growth), so at end-of-stream
+ * the buffer holds the whole transfer. No length prefix on the wire
+ * (raw-until-close), same as streaming.
  * This is the cost of "hand me the whole thing" for a minimal buffer API.
  */
 
@@ -61,7 +62,7 @@ static asio::awaitable<bool> connect_to_server(
     co_return !ec;
 }
 
-static asio::awaitable<bool> receive_whole_object(
+static asio::awaitable<bool> receive_whole_transfer(
     tcp::socket& socket,
     std::uint64_t& total_bytes
 ) {
@@ -116,7 +117,7 @@ static asio::awaitable<bool> run_benchmark_client(
         co_return false;
     }
 
-    co_return co_await receive_whole_object(socket, total_bytes);
+    co_return co_await receive_whole_transfer(socket, total_bytes);
 }
 
 static bool run_benchmark_client_blocking(
@@ -137,7 +138,7 @@ static bool run_benchmark_client_blocking(
     return result.get();
 }
 
-static void BM_TCP_WholeObject(benchmark::State& state) {
+static void BM_TCP_WholeTransfer(benchmark::State& state) {
     const char* ip = g_server_ip.c_str();
     const int port = g_port;
 
@@ -164,7 +165,7 @@ static void BM_TCP_WholeObject(benchmark::State& state) {
     state.counters["downloaded_bytes"] = static_cast<double>(last_downloaded_bytes);
 }
 
-BENCHMARK(BM_TCP_WholeObject)
+BENCHMARK(BM_TCP_WholeTransfer)
     ->Unit(benchmark::kMillisecond)
     ->Iterations(1)
     ->UseRealTime();

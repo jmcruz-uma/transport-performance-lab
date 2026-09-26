@@ -40,7 +40,7 @@
 #                           see netem_common.sh)
 #   NETEM_SCENARIOS       RUN_SCENARIOS value passed to each run_bench.py
 #                          (default: every scenario in bench_scenarios.py --
-#                          streaming, whole_object, framed, tls, tls_framed,
+#                          streaming, whole_transfer, framed, tls, tls_framed,
 #                          udp_k64, udp_k1400; narrow this to iterate faster)
 #   NETEM_PROJECTS        which subprojects to sweep (default: same 5 as run.sh)
 #   NETEM_COMPILERS       compilers to measure (default: "gcc")
@@ -73,7 +73,7 @@ NETEM_RTTS_MS="${NETEM_RTTS_MS:-0 1 10 50}"
 NETEM_LOSS_PCT="${NETEM_LOSS_PCT:-0 1 5}"
 # Every scenario bench_scenarios.py defines. Keep this list in sync with that
 # file's SCENARIOS dict if a scenario is ever added/renamed there.
-NETEM_SCENARIOS="${NETEM_SCENARIOS:-streaming whole_object framed tls tls_framed udp_k64 udp_k1400}"
+NETEM_SCENARIOS="${NETEM_SCENARIOS:-streaming whole_transfer framed tls tls_framed udp_k64 udp_k1400}"
 NETEM_PROJECTS="${NETEM_PROJECTS:-asio taps-asio async-berkeley bsd-sockets capy-corosio}"
 NETEM_RTT_TOLERANCE_MS="${NETEM_RTT_TOLERANCE_MS:-2}"
 # Transfers under delay and loss take far longer than on loopback, so the sweep
