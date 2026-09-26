@@ -46,6 +46,10 @@ each scenario independently.
 Env:
   RUN_SCENARIOS="framed udp"   run only these (space/comma separated); default all
   DRY_RUN=1                    plumbing-only local validation, no real execution
+  PAYLOAD=10MB                 payload of every scenario: 100MB (default) or 10MB
+  TCP_CASES, TCP_THREADS,      client counts and server thread counts of the TCP
+  UDP_CASES, UDP_THREADS       and UDP scenarios (space separated); default the
+                               full grid below. The D7 sweep narrows them.
 """
 
 import json
@@ -56,11 +60,26 @@ from pathlib import Path
 #   server / bench: basename under build-<compiler>/<server>/<server> and
 #                   build-<compiler>/benchmarks/<bench>
 #   env:            extra environment for both the server and the bench processes
-# Full client grid by default. The D7 sweep (netem/run_rtt_sweep.sh) narrows it through
-# TCP_CASES to fit its time budget.
-_TCP_CASES = [int(c) for c in os.environ.get("TCP_CASES", "1 2 4 8 16").split()]
-_TCP_GRID = dict(cases=_TCP_CASES, threads=[1, 2, 4, 8])
-_UDP_GRID = dict(cases=[1, 2, 4, 8], threads=[1, 2, 4])
+# Full grid by default. The D7 sweep (netem/run_rtt_sweep.sh) narrows it through the
+# environment to fit its time budget.
+def _grid(cases_var, cases, threads_var, threads):
+    return dict(cases=[int(c) for c in os.environ.get(cases_var, cases).split()],
+                threads=[int(t) for t in os.environ.get(threads_var, threads).split()])
+
+_TCP_GRID = _grid("TCP_CASES", "1 2 4 8 16", "TCP_THREADS", "1 2 4 8")
+_UDP_GRID = _grid("UDP_CASES", "1 2 4 8", "UDP_THREADS", "1 2 4")
+
+# The payload every server sends and, for the framed scenarios, the manifest of message
+# sizes cut from it. Chosen together so the two can never disagree. Paths are relative
+# to each subproject dir (run_bench.py's cwd).
+_PAYLOADS = {
+    "100MB": ("../files/100MB.bin", "../tls/manifest.txt"),
+    "10MB":  ("../files/10MB.bin",  "../tls/manifest_10MB.txt"),
+}
+PAYLOAD = os.environ.get("PAYLOAD", "100MB")
+if PAYLOAD not in _PAYLOADS:
+    raise SystemExit(f"Unknown PAYLOAD={PAYLOAD!r}. Valid: {list(_PAYLOADS)}")
+PAYLOAD_FILE, _MANIFEST = _PAYLOADS[PAYLOAD]
 
 # The tls / tls_framed scenarios add a TLS 1.3 record layer to the streaming and
 # framed models. Cert/CA paths are relative to each subproject dir (run_bench.py's
@@ -74,11 +93,11 @@ SCENARIOS = {
     "streaming":    dict(server="tcpserver", bench="bench_tcp",        **_TCP_GRID),
     "whole_object": dict(server="tcpserver", bench="bench_tcp_whole",  **_TCP_GRID),
     "framed":       dict(server="tcpserver_framed", bench="bench_tcp_framed",
-                         env={"MANIFEST": "../tls/manifest.txt"}, **_TCP_GRID),
+                         env={"MANIFEST": _MANIFEST}, **_TCP_GRID),
     "tls":          dict(server="tcpserver_tls", bench="bench_tcp_tls",
                          env=dict(_TLS_ENV), **_TCP_GRID),
     "tls_framed":   dict(server="tcpserver_tls_framed", bench="bench_tcp_tls_framed",
-                         env={**_TLS_ENV, "TLS_MANIFEST": "../tls/manifest.txt"},
+                         env={**_TLS_ENV, "TLS_MANIFEST": _MANIFEST},
                          **_TCP_GRID),
     # 65507 = 65535 - 8 (UDP header) - 20 (IPv4 header): the true max IPv4 UDP
     # payload. 65536 ("64 KiB" literally) is one byte over it and every

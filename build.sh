@@ -182,6 +182,11 @@ setup_tls_assets() {
   "$ROOT_DIR/tls/gen_certs.sh"
   "$ROOT_DIR/tls/gen_payload.sh"
   python3 "$ROOT_DIR/tls/gen_manifest.py"
+  # D7 sweep payload (PAYLOAD=10MB): 10 MiB, and the same message-size
+  # distribution cut to 1000 messages.
+  "$ROOT_DIR/tls/gen_payload.sh" 10485760 10MB.bin
+  python3 "$ROOT_DIR/tls/gen_manifest.py" --n 1000 --target-mib 10 \
+      --out "$ROOT_DIR/tls/manifest_10MB.txt"
 }
 
 build_project() {

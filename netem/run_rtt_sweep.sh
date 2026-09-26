@@ -31,9 +31,9 @@
 #   6. tears down the netns+veth topology
 #
 # Env config (all optional):
-#   NETEM_RTTS_MS        target RTTs in ms, space-separated (default: "0 1 5 10 20 50")
+#   NETEM_RTTS_MS        target RTTs in ms, space-separated (default: "0 1 10 50")
 #   NETEM_LOSS_PCT        target average loss rates in %, space-separated
-#                          (default: "0 0.1 1 5" -- see netem_common.sh for the
+#                          (default: "0 1 5" -- see netem_common.sh for the
 #                          Simple Gilbert derivation; combined with NETEM_RTTS_MS
 #                          as a full factorial grid)
 #   NETEM_MEAN_BURST_PKTS  mean consecutive packets per loss event (default: 3,
@@ -43,6 +43,12 @@
 #                          streaming, whole_object, framed, tls, tls_framed,
 #                          udp_k64, udp_k1400; narrow this to iterate faster)
 #   NETEM_PROJECTS        which subprojects to sweep (default: same 5 as run.sh)
+#   NETEM_COMPILERS       compilers to measure (default: "gcc")
+#   NETEM_CASES           client counts, TCP and UDP alike (default: "1 4 16")
+#   NETEM_THREADS         server thread counts, TCP and UDP alike (default: "1 4")
+#   NETEM_REPETITIONS     measured repetitions per case (default: 15)
+#   NETEM_PAYLOAD         payload of every scenario, see bench_scenarios.py
+#                          (default: "10MB")
 #   NETEM_RATE_MBIT        bandwidth cap paired with the delay (default: 1000, see netem_common.sh)
 #   NETEM_LIMIT_PKTS       netem queue depth (default: 50000, see netem_common.sh)
 #   NETEM_RTT_TOLERANCE_MS how far the measured RTT may drift from the target
@@ -70,10 +76,16 @@ NETEM_LOSS_PCT="${NETEM_LOSS_PCT:-0 1 5}"
 NETEM_SCENARIOS="${NETEM_SCENARIOS:-streaming whole_object framed tls tls_framed udp_k64 udp_k1400}"
 NETEM_PROJECTS="${NETEM_PROJECTS:-asio taps-asio async-berkeley bsd-sockets capy-corosio}"
 NETEM_RTT_TOLERANCE_MS="${NETEM_RTT_TOLERANCE_MS:-2}"
-# The sweep measures one compiler and fewer TCP client levels than the loopback
-# campaign, to fit its time budget. Passed to run_bench.py / bench_scenarios.py.
+# Transfers under delay and loss take far longer than on loopback, so the sweep
+# measures a smaller campaign than the base one: one compiler, fewer client and
+# server-thread levels, 15 measured repetitions per case (plus the warm-up one
+# run_bench.py always adds), and a 10 MiB payload -- enough to exercise congestion
+# control and TCP buffering. Passed to run_bench.py / bench_scenarios.py.
 NETEM_COMPILERS="${NETEM_COMPILERS:-gcc}"
-NETEM_TCP_CASES="${NETEM_TCP_CASES:-1 4 16}"
+NETEM_CASES="${NETEM_CASES:-1 4 16}"
+NETEM_THREADS="${NETEM_THREADS:-1 4}"
+NETEM_REPETITIONS="${NETEM_REPETITIONS:-15}"
+NETEM_PAYLOAD="${NETEM_PAYLOAD:-10MB}"
 DRY_RUN="${DRY_RUN:-}"
 
 MANIFEST_DIR="$ROOT_DIR/results_netem"
@@ -187,18 +199,6 @@ run_point() {
     fi
     capture_tcp_environment "$rtt_ms" "$loss_pct"
 
-    # 25 repetitions is fine at the grid's easy end, but a calibration probe
-    # (2026-09-22, RTT=50ms/loss=5%, bsd-sockets/blocks) found a single
-    # case=1 repetition can legitimately take ~2326s to complete -- 25 of
-    # those is ~16h for one (compiler, server_threads) combination alone.
-    # Cut repetitions at the harsh end of the grid instead of pretending the
-    # easy-end sample size is affordable everywhere.
-    local reps_override="25"
-    if python3 -c "import sys; sys.exit(0 if (float('$rtt_ms') >= 50 or float('$loss_pct') >= 5) else 1)"; then
-        reps_override="15"
-        log "Hard grid point (RTT=${rtt_ms}ms loss=${loss_pct}%) -- reducing MACRO_REPETITIONS to $reps_override"
-    fi
-
     for project_dir in $NETEM_PROJECTS; do
         local full_dir="$ROOT_DIR/$project_dir"
         local run_script="$full_dir/scripts/run_bench.py"
@@ -219,8 +219,11 @@ run_point() {
         # possibly days of measurement, over one bad combination. Recorded
         # and reported at the end instead; this point/project's own results
         # (if partial) are still collected by relocate_results below.
-        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$reps_override" \
-                RUN_COMPILERS="$NETEM_COMPILERS" TCP_CASES="$NETEM_TCP_CASES" python3 scripts/run_bench.py ); then
+        if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$NETEM_REPETITIONS" \
+                RUN_COMPILERS="$NETEM_COMPILERS" PAYLOAD="$NETEM_PAYLOAD" \
+                TCP_CASES="$NETEM_CASES" TCP_THREADS="$NETEM_THREADS" \
+                UDP_CASES="$NETEM_CASES" UDP_THREADS="$NETEM_THREADS" \
+                python3 scripts/run_bench.py ); then
             log "ERROR: run_bench.py failed for $project_dir at RTT=${rtt_ms}ms loss=${loss_pct}% -- see the traceback above."
             log "Continuing with the remaining projects/grid points instead of losing the rest of the sweep."
             SWEEP_FAILURES+=("$project_dir @ RTT=${rtt_ms}ms loss=${loss_pct}%")
@@ -244,6 +247,7 @@ main() {
     log "Grid size: $(echo $NETEM_RTTS_MS | wc -w) x $(echo $NETEM_LOSS_PCT | wc -w) = $(( $(echo $NETEM_RTTS_MS | wc -w) * $(echo $NETEM_LOSS_PCT | wc -w) )) points"
     log "Scenarios: $NETEM_SCENARIOS"
     log "Projects: $NETEM_PROJECTS"
+    log "Campaign: compilers [$NETEM_COMPILERS], clients [$NETEM_CASES], server threads [$NETEM_THREADS], $NETEM_REPETITIONS measured repetitions (+1 warm-up), payload $NETEM_PAYLOAD"
 
     if [ -z "$DRY_RUN" ]; then
         netem_require

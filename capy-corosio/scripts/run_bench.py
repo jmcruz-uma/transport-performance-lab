@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from bench_scenarios import SCENARIOS, DRY_RUN, active_scenarios, is_done, mark_done
+from bench_scenarios import SCENARIOS, DRY_RUN, PAYLOAD_FILE, active_scenarios, is_done, mark_done
 
 
 # =========================
@@ -58,7 +58,7 @@ PORTS = {
 # RUN_COMPILERS to fit its time budget.
 COMPILERS = os.environ.get("RUN_COMPILERS", "gcc clang").split()
 
-FILE_TO_SERVE = "../files/100MB.bin"
+FILE_TO_SERVE = PAYLOAD_FILE
 # Overridden by the D7 netem/netns sweep (netem/run_rtt_sweep.sh) so the server
 # is reached across the netns+veth link instead of loopback; see netem/netem_common.sh.
 HOST = os.environ.get("NETEM_SERVER_HOST", "127.0.0.1")
