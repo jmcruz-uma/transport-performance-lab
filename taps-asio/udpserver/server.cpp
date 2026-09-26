@@ -35,6 +35,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <memory_resource>
 #include <string>
 #include <thread>
 #include <vector>
@@ -107,11 +108,11 @@ static asio::awaitable<void> accept_loop(
 }
 
 static asio::awaitable<void> run_server(
-    asio::io_context& io_context, int port,
+    asio::io_context& io_context, std::pmr::memory_resource* message_memory, int port,
     std::shared_ptr<std::vector<std::uint8_t>> payload,
     std::size_t dgram_size
 ) {
-    taps::TransportServices ts(io_context);
+    taps::TransportServices ts(io_context, taps::MessageMemoryConfig{message_memory});
     taps::TransportProperties props;
     props.set(taps::PropertyKey::RELIABILITY, taps::SelectionProperty::AVOID);
 
@@ -164,10 +165,15 @@ int main(int argc, char* argv[]) {
 
     const std::size_t dgram_size = dgram_bytes();
 
+    // Connections receive, and release received Messages, on every pool thread,
+    // so message memory must come from a thread-safe resource (the library's
+    // default one is not).
+    std::pmr::synchronized_pool_resource message_memory(taps::message_pool_options());
+
     asio::io_context io_context;
     auto work_guard = asio::make_work_guard(io_context);
 
-    asio::co_spawn(io_context, run_server(io_context, port, payload, dgram_size), asio::detached);
+    asio::co_spawn(io_context, run_server(io_context, &message_memory, port, payload, dgram_size), asio::detached);
 
     std::vector<std::thread> pool;
     pool.reserve(static_cast<std::size_t>(threads));
