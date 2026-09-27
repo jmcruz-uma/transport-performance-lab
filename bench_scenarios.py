@@ -12,6 +12,11 @@ nothing to toggle by hand.
                     buffer. Non-TAPS: accumulate into one growing buffer.
                     TAPS: PassthroughFramer(gather=true) -> one receive() ->
                     as_bytes().
+  streaming_naive, whole_transfer_naive
+                E8  TAPS only: the same clients as streaming / whole_transfer,
+                    with message memory taken from the heap and never recycled
+                    (std::pmr::new_delete_resource) instead of the library's
+                    default recycling pool. Other arms skip them (no binaries).
   framed        E3  length-prefixed application framing, NO security layer --
                     the plaintext mirror of "tls_framed" (same manifest, same
                     frame format, same deframing loop, just no TLS record
@@ -36,8 +41,8 @@ nothing to toggle by hand.
                     it), 5-way.
   udp_k1400     E4  same, ~MTU-sized datagrams.
 
-Same wire for streaming / whole_transfer (raw-until-close), so they share
-`tcpserver`. "framed" has its own wire (length-prefixed messages, no security)
+Same wire for streaming / whole_transfer and their naive variants
+(raw-until-close), so they share `tcpserver`. "framed" has its own wire (length-prefixed messages, no security)
 and its own server, `tcpserver_framed`, mirroring "tls_framed"'s
 `tcpserver_tls_framed` minus the TLS record layer. Per-scenario grid / target
 binaries / env live in SCENARIOS. Output and resume-state are per scenario:
@@ -93,6 +98,8 @@ _TLS_ENV = {"TLS_CERT": "../tls/server.crt",
 SCENARIOS = {
     "streaming":    dict(server="tcpserver", bench="bench_tcp",        **_TCP_GRID),
     "whole_transfer": dict(server="tcpserver", bench="bench_tcp_whole_transfer",  **_TCP_GRID),
+    "streaming_naive":      dict(server="tcpserver", bench="bench_tcp_naive",                **_TCP_GRID),
+    "whole_transfer_naive": dict(server="tcpserver", bench="bench_tcp_whole_transfer_naive", **_TCP_GRID),
     "framed":       dict(server="tcpserver_framed", bench="bench_tcp_framed",
                          env={"MANIFEST": _MANIFEST}, **_TCP_GRID),
     "tls":          dict(server="tcpserver_tls", bench="bench_tcp_tls",

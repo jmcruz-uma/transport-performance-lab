@@ -20,6 +20,21 @@ target_link_libraries(bench_tcp_whole_transfer
 
 target_compile_features(bench_tcp_whole_transfer PRIVATE cxx_std_23)
 
+# --- naive variants (scenarios "streaming_naive", "whole_transfer_naive") ----
+# Same sources as bench_tcp / bench_tcp_whole_transfer; the only difference is
+# that message memory comes from the heap with no recycling (message_memory.hpp).
+foreach(client bench_tcp bench_tcp_whole_transfer)
+    add_executable(${client}_naive ${client}.cpp)
+    target_compile_definitions(${client}_naive PRIVATE TAPS_NAIVE_MESSAGE_MEMORY)
+    target_link_libraries(${client}_naive
+        PRIVATE
+            TAPS::static
+            Threads::Threads
+            benchmark::benchmark
+    )
+    target_compile_features(${client}_naive PRIVATE cxx_std_23)
+endforeach()
+
 # --- framed benchmark (scenario "framed", replaces old "blocks") -----------
 add_executable(bench_tcp_framed bench_tcp_framed.cpp)
 

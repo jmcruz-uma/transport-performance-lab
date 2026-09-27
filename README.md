@@ -466,8 +466,8 @@ of this, `apply` refuses to run again on top of an existing state file --
 
 ## Every result, from every experiment, has the same shape
 
-Every scenario -- `streaming`/`whole_transfer`/`framed`/`tls`/`tls_framed`/
-`udp_k64`/`udp_k1400`, under plain loopback (`run.sh`) or under any point of
+Every scenario -- `streaming`/`whole_transfer`/`streaming_naive`/
+`whole_transfer_naive`/`framed`/`tls`/`tls_framed`/`udp_k64`/`udp_k1400`, under plain loopback (`run.sh`) or under any point of
 the D7 netem RTT x loss grid (`netem/run_rtt_sweep.sh`) -- is produced by the
 exact same code path in each project's `scripts/run_bench.py`. The netem
 sweep changes *where the server and client connect* (a namespace's veth IP

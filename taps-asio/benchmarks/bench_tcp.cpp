@@ -7,6 +7,8 @@
 
 #include "taps/taps_api.h"
 
+#include "message_memory.hpp"
+
 #include <benchmark/benchmark.h>
 
 #include <asio.hpp>
@@ -59,7 +61,7 @@ static asio::awaitable<std::uint64_t> receive_data(
     const char* ip,
     int port
 ) {
-    taps::TransportServices transport_services(io_context);
+    taps::TransportServices transport_services(io_context, client_message_memory());
 
     auto connection = co_await connect_to_server(transport_services, ip, port);
     if (!connection) {
