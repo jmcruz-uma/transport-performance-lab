@@ -38,15 +38,14 @@ constexpr int DEFAULT_PORT = 8080;
 static int g_port = DEFAULT_PORT;
 static std::string g_server_ip = "127.0.0.1";
 
-static asio::awaitable<std::uint64_t> receive_datagrams(taps::Connection& connection) {
+static asio::awaitable<void> receive_datagrams(taps::Connection& connection,
+                                               std::uint64_t& total_bytes) {
     // Request datagram: content is irrelevant, only its arrival matters (it
     // gives PassiveUDPConnection this client's address to reply to). One byte,
     // not zero -- a zero-length send would be indistinguishable from the
     // sentinel this same loop watches for below.
     const std::array<std::uint8_t, 1> request{'r'};
     (void)co_await connection.send(taps::make_message_view(std::span<const std::uint8_t>(request)));
-
-    std::uint64_t total_bytes = 0;
 
     while (true) {
         auto receive_result = co_await connection.receive();
@@ -69,8 +68,6 @@ static asio::awaitable<std::uint64_t> receive_datagrams(taps::Connection& connec
         benchmark::DoNotOptimize(total_bytes);
         benchmark::ClobberMemory();
     }
-
-    co_return total_bytes;
 }
 
 static asio::awaitable<std::uint64_t> run_download(
@@ -92,17 +89,19 @@ static asio::awaitable<std::uint64_t> run_download(
 
     // Bound the exchange: unlike TCP, nothing signals a lost final sentinel
     // on its own. Racing means the timer is cancelled the moment the real
-    // exchange finishes, so a fast transfer never waits out the timeout.
+    // exchange finishes, so a fast transfer never waits out the timeout. If
+    // the timer wins, what arrived so far still counts, as in the other arms.
     auto executor = co_await asio::this_coro::executor;
     asio::steady_timer timer(executor);
     timer.expires_after(std::chrono::seconds(5));
 
-    auto raced = co_await (
-        receive_datagrams(*connection) ||
+    std::uint64_t total_bytes = 0;
+    (void)co_await (
+        receive_datagrams(*connection, total_bytes) ||
         timer.async_wait(asio::use_awaitable)
     );
 
-    co_return raced.index() == 0 ? std::get<0>(raced) : 0;
+    co_return total_bytes;
 }
 
 static bool run_benchmark_download(const char* ip, int port, std::uint64_t& downloaded_bytes) {
