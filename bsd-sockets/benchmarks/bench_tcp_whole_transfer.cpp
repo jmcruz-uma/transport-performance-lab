@@ -59,7 +59,7 @@ static int connect_to_server(const std::string& server_ip, int port) {
 
 static bool receive_whole_transfer(int sock, std::uint64_t& total_bytes) {
     std::vector<char> object;
-    std::array<char, READ_CHUNK> chunk{};
+    std::array<char, READ_CHUNK> chunk;
 
     while (true) {
         const ssize_t n = recv(sock, chunk.data(), chunk.size(), 0);

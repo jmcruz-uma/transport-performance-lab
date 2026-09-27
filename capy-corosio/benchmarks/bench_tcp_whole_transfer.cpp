@@ -77,7 +77,7 @@ static capy::task<bool> run_benchmark_client(
     }
 
     std::vector<char> object;
-    std::array<char, READ_CHUNK> chunk{};
+    std::array<char, READ_CHUNK> chunk;
 
     while (true) {
         auto [read_ec, n] = co_await socket.read_some(

@@ -37,7 +37,7 @@ constexpr std::size_t BUFFER_SIZE = 8192;
 
 struct ClientState {
     dialog client;
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
     std::ofstream output_file;
     bool failed = false;
 

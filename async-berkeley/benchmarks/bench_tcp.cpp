@@ -43,7 +43,7 @@ static std::string g_server_ip = "127.0.0.1";
 
 struct BenchmarkState {
     dialog client;
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
     std::uint64_t total_bytes = 0;
     bool failed = false;
 

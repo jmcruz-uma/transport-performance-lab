@@ -116,7 +116,7 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
     const std::string& server_ip = g_server_ip;
     const int port = g_port;
 
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
     std::uint64_t bytes_processed = 0;
     std::uint64_t last_downloaded_bytes = 0;
 

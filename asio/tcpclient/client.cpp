@@ -62,7 +62,7 @@ static asio::awaitable<bool> receive_file(
         co_return false;
     }
 
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
     std::uint64_t total_bytes = 0;
 
     while (true) {

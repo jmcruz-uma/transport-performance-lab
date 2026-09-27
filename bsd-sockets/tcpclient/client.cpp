@@ -57,7 +57,7 @@ static bool receive_file(int sock, const std::string& output_path) {
         return false;
     }
 
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
 
     while (true) {
         const ssize_t n = recv(sock, buffer.data(), buffer.size(), 0);

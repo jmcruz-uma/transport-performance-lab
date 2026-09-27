@@ -128,7 +128,7 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
     for (auto _ : state) {
         (void)_;
         corosio::io_context context;
-        std::array<char, BUFFER_SIZE> buffer{};
+        std::array<char, BUFFER_SIZE> buffer;
         std::uint64_t downloaded_bytes = 0;
 
         auto task = run_benchmark_client(context, ip, port,

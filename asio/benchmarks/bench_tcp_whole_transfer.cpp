@@ -67,7 +67,7 @@ static asio::awaitable<bool> receive_whole_transfer(
     std::uint64_t& total_bytes
 ) {
     std::vector<char> object;
-    std::array<char, READ_CHUNK> chunk{};
+    std::array<char, READ_CHUNK> chunk;
 
     while (true) {
         std::error_code ec;

@@ -74,7 +74,7 @@ static bool receive_datagrams(int sock, std::uint64_t& total_bytes) {
         return false;
     }
 
-    std::array<char, RECV_BUFFER_BYTES> buffer{};
+    std::array<char, RECV_BUFFER_BYTES> buffer;
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(RECV_TIMEOUT_SECONDS);
 

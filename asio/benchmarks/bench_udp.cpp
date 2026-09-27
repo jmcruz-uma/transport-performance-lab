@@ -51,7 +51,7 @@ static asio::awaitable<bool> receive_datagrams(
         co_return false;
     }
 
-    std::array<char, RECV_BUFFER_BYTES> buffer{};
+    std::array<char, RECV_BUFFER_BYTES> buffer;
 
     while (true) {
         udp::endpoint from;

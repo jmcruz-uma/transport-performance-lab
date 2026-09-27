@@ -56,7 +56,7 @@ static std::string g_server_ip = "127.0.0.1";
 
 struct BenchmarkState {
     dialog client;
-    std::array<char, READ_CHUNK> chunk{};   // reused scratch buffer for each read
+    std::array<char, READ_CHUNK> chunk;   // reused scratch buffer for each read
     std::vector<char> object;               // grows geometrically; at EOF it is the object
     bool failed = false;
 

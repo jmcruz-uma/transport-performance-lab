@@ -17,7 +17,8 @@
 // receive buffer" comparability parameter) and grows only to hold a single frame
 // larger than that -- mirroring the TAPS arm, whose block chain also grows for a
 // large Message. Each read is still capped at kReadChunk, so the read count per
-// byte transferred matches across arms regardless of frame size.
+// byte transferred matches across arms regardless of frame size. The buffer is
+// never zero-filled: every byte is written by a read before it is parsed.
 
 #pragma once
 
@@ -25,9 +26,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <span>
-#include <vector>
 
 namespace tlsframe {
 
@@ -39,7 +40,7 @@ inline constexpr std::size_t kMaxFrame = 64 * 1024 * 1024;
 
 class FrameReader {
 public:
-    FrameReader() : buf_(kReadChunk) {}
+    FrameReader() { grow_to(kReadChunk); }
 
     // Writable region for the next read; never larger than kReadChunk. Call
     // committed() with the number of bytes actually read into it.
@@ -50,13 +51,13 @@ public:
         if (used_ >= kLengthPrefix) {
             const std::size_t len = peek_length();
             const std::size_t need = kLengthPrefix + len;
-            if (len <= kMaxFrame && need > buf_.size()) buf_.resize(need);
+            if (len <= kMaxFrame && need > size_) grow_to(need);
         }
-        if (buf_.size() - used_ < kReadChunk && used_ == buf_.size()) {
-            buf_.resize(buf_.size() + kReadChunk);
+        if (size_ - used_ < kReadChunk && used_ == size_) {
+            grow_to(size_ + kReadChunk);
         }
-        const std::size_t room = std::min(kReadChunk, buf_.size() - used_);
-        return {buf_.data() + used_, room};
+        const std::size_t room = std::min(kReadChunk, size_ - used_);
+        return {buf_.get() + used_, room};
     }
 
     void committed(std::size_t n) { used_ += n; }
@@ -67,7 +68,7 @@ public:
         if (used_ - parsed_ < kLengthPrefix) return std::nullopt;
         const std::size_t len = peek_length();
         if (used_ - parsed_ < kLengthPrefix + len) return std::nullopt;
-        const char* body = buf_.data() + parsed_ + kLengthPrefix;
+        const char* body = buf_.get() + parsed_ + kLengthPrefix;
         parsed_ += kLengthPrefix + len;
         return std::span<const char>{body, len};
     }
@@ -78,7 +79,7 @@ public:
 
 private:
     std::size_t peek_length() const {
-        const auto* p = reinterpret_cast<const unsigned char*>(buf_.data() + parsed_);
+        const auto* p = reinterpret_cast<const unsigned char*>(buf_.get() + parsed_);
         return (static_cast<std::size_t>(p[0]) << 24) |
                (static_cast<std::size_t>(p[1]) << 16) |
                (static_cast<std::size_t>(p[2]) << 8) |
@@ -88,12 +89,27 @@ private:
     void compact() {
         if (parsed_ == 0) return;
         const std::size_t rem = used_ - parsed_;
-        if (rem > 0) std::memmove(buf_.data(), buf_.data() + parsed_, rem);
+        if (rem > 0) std::memmove(buf_.get(), buf_.get() + parsed_, rem);
         used_ = rem;
         parsed_ = 0;
     }
 
-    std::vector<char> buf_;
+    // Makes n bytes usable. Storage grows geometrically, as std::vector's does, but
+    // without initialising it; only the valid bytes move to the new storage.
+    void grow_to(std::size_t n) {
+        if (n > cap_) {
+            const std::size_t cap = std::max(n, 2 * cap_);
+            auto bigger = std::make_unique_for_overwrite<char[]>(cap);
+            if (used_ > 0) std::memcpy(bigger.get(), buf_.get(), used_);
+            buf_ = std::move(bigger);
+            cap_ = cap;
+        }
+        size_ = n;
+    }
+
+    std::unique_ptr<char[]> buf_;
+    std::size_t cap_ = 0;     // allocated bytes
+    std::size_t size_ = 0;    // usable bytes (reads fill [used_, size_))
     std::size_t used_ = 0;    // valid bytes in buf_
     std::size_t parsed_ = 0;  // offset of first unparsed byte
 };

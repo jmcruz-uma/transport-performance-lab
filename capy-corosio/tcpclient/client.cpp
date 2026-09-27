@@ -74,7 +74,7 @@ static capy::task<void> run_client(
         co_return;
     }
 
-    std::array<char, BUFFER_SIZE> buffer{};
+    std::array<char, BUFFER_SIZE> buffer;
     std::uint64_t total_bytes = 0;
 
     while (true) {

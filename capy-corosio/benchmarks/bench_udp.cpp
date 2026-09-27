@@ -53,7 +53,7 @@ static capy::task<bool> receive_datagrams(
         co_return false;
     }
 
-    std::array<char, RECV_BUFFER_BYTES> buffer{};
+    std::array<char, RECV_BUFFER_BYTES> buffer;
 
     while (true) {
         auto [ec, n] = co_await sock.recv(
