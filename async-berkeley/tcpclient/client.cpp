@@ -2,7 +2,9 @@
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
  * TCP file client with async-berkeley
- * Minimal raw-byte client for performance and energy measurements.
+ * Manual smoke-test tool: downloads the served file and writes it to disk, to
+ * check by hand that a server works. No campaign runs it; the measured clients
+ * are in ../benchmarks/.
  */
 
 #include <io/io.hpp>
@@ -33,7 +35,7 @@ using dialog = socket_dialog<poll_multiplexer>;
 using message = socket_message<sockaddr_in>;
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::size_t BUFFER_SIZE = 8192;
+constexpr std::size_t BUFFER_SIZE = 65536;
 
 struct ClientState {
     dialog client;

@@ -2,7 +2,9 @@
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
  * TCP file client with Corosio
- * Minimal raw-byte client for performance and energy measurements.
+ * Manual smoke-test tool: downloads the served file and writes it to disk, to
+ * check by hand that a server works. No campaign runs it; the measured clients
+ * are in ../benchmarks/.
  */
 
 #include <array>
@@ -23,7 +25,7 @@ namespace corosio = boost::corosio;
 namespace capy = boost::capy;
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::size_t BUFFER_SIZE = 8192;
+constexpr std::size_t BUFFER_SIZE = 65536;
 
 static bool is_clean_eof(const std::error_code& ec) {
     if (!ec) {

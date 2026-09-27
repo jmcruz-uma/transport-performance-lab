@@ -38,6 +38,11 @@ Each subproject may contain:
 - its own `scripts/run_bench.py`
 - its own `results/` directory
 - its own compiler and dependency configuration
+- `benchmarks/`: the clients every campaign runs and measures (`bench_*`)
+- `tcpclient/`: a manual smoke-test tool that downloads the served file to disk
+  (`tcpclient <ip> <port> <output>`), to check by hand that a server works. No
+  campaign runs it, and it does not track the measured clients' configuration:
+  what is measured lives only in `benchmarks/`.
 
 The global scripts do **not** replace that internal logic. They coordinate it.
 

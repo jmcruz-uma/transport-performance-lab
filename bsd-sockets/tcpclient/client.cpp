@@ -2,7 +2,9 @@
  * Copyright (c) 2026 Jose Antonio Garcia Montanez
  *
  * TCP file client with BSD sockets
- * Minimal raw-byte client for performance and energy measurements.
+ * Manual smoke-test tool: downloads the served file and writes it to disk, to
+ * check by hand that a server works. No campaign runs it; the measured clients
+ * are in ../benchmarks/.
  */
 
 #include <arpa/inet.h>
