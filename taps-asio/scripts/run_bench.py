@@ -206,12 +206,14 @@ PORT_RETRY_SPAN = 200
 # reps are NOT retried (see the plain `for rep in range(...)` repetition
 # loop below) -- every kill both wastes the time already spent AND silently
 # shrinks and biases the sample (the slowest, most informative tail is
-# exactly what gets thrown away). No genuine hang has ever actually been
-# observed across ~9 days of real runs; every "slow" case measured so far
-# has been slow-but-finite. Raised to 28800s (8h, ~12x the worst
-# legitimately-completing case measured, 2326s) so this stops being the
-# thing that decides the sample -- it exists only to catch something
-# actually broken, not to bound how long a real transfer is allowed to take.
+# exactly what gets thrown away). Raised to 28800s (8h, ~12x the worst
+# legitimately-completing case measured, 2326s, with a 100 MB payload) so
+# this stops being the thing that decides the sample -- it exists to catch
+# something actually broken, not to bound how long a real transfer is
+# allowed to take. Genuine hangs do happen under heavy loss: a client stays
+# blocked on a connection its peer has already given up on. The bound covers
+# a repetition as a whole, and a campaign that knows its worst legitimate
+# case sets it lower through the environment (the D7 sweep does).
 BENCH_CLIENT_TIMEOUT_SECONDS = float(os.environ.get("BENCH_CLIENT_TIMEOUT_SECONDS", "28800"))
 
 # =========================
@@ -800,14 +802,17 @@ def run_macro_bench_case(compiler, server_threads, num_benches, repetition, file
             processes.append((proc, out_json, err_file))
             outputs.append(out_json)
 
+        # One deadline for the whole repetition: its clients all start together,
+        # so each one is waited for only what is left of that deadline.
+        deadline = time.monotonic() + BENCH_CLIENT_TIMEOUT_SECONDS
         for proc, _, err_file in processes:
             try:
-                proc.wait(timeout=BENCH_CLIENT_TIMEOUT_SECONDS)
+                proc.wait(timeout=max(0.0, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 log(
                     f"WARNING: bench client (pid={proc.pid}) did not finish within "
-                    f"{BENCH_CLIENT_TIMEOUT_SECONDS}s -- killing it and counting this "
-                    f"repetition as failed instead of hanging the whole campaign."
+                    f"{BENCH_CLIENT_TIMEOUT_SECONDS}s of the repetition's start -- killing it "
+                    f"and counting this repetition as failed instead of hanging the whole campaign."
                 )
                 stop_bench_process(proc)
             err_file.close()
