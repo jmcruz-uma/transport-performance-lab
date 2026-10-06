@@ -49,6 +49,8 @@
 #   NETEM_REPETITIONS     measured repetitions per case (default: 15)
 #   NETEM_PAYLOAD         payload of every scenario, see bench_scenarios.py
 #                          (default: "10MB")
+#   NETEM_CLIENT_TIMEOUT  seconds a repetition may take before its clients are
+#                          killed and it counts as failed (default: 900)
 #   NETEM_RATE_MBIT        bandwidth cap paired with the delay (default: 1000, see netem_common.sh)
 #   NETEM_LIMIT_PKTS       netem queue depth (default: 50000, see netem_common.sh)
 #   NETEM_RTT_TOLERANCE_MS how far the measured RTT may drift from the target
@@ -86,6 +88,12 @@ NETEM_CASES="${NETEM_CASES:-1 4 16}"
 NETEM_THREADS="${NETEM_THREADS:-1 4}"
 NETEM_REPETITIONS="${NETEM_REPETITIONS:-15}"
 NETEM_PAYLOAD="${NETEM_PAYLOAD:-10MB}"
+# Per-repetition bound on the bench clients (BENCH_CLIENT_TIMEOUT_SECONDS in
+# run_bench.py, 8 h by default). With the 10 MiB payload a legitimate
+# repetition takes seconds to a few minutes even at RTT 50 ms / 1 % loss,
+# while a client hung on a dead connection would otherwise hold the sweep
+# for hours.
+NETEM_CLIENT_TIMEOUT="${NETEM_CLIENT_TIMEOUT:-900}"
 DRY_RUN="${DRY_RUN:-}"
 
 MANIFEST_DIR="$ROOT_DIR/results_netem"
@@ -221,6 +229,7 @@ run_point() {
         # (if partial) are still collected by relocate_results below.
         if ! ( cd "$full_dir" && RUN_SCENARIOS="$NETEM_SCENARIOS" MACRO_REPETITIONS="$NETEM_REPETITIONS" \
                 RUN_COMPILERS="$NETEM_COMPILERS" PAYLOAD="$NETEM_PAYLOAD" \
+                BENCH_CLIENT_TIMEOUT_SECONDS="$NETEM_CLIENT_TIMEOUT" \
                 TCP_CASES="$NETEM_CASES" TCP_THREADS="$NETEM_THREADS" \
                 UDP_CASES="$NETEM_CASES" UDP_THREADS="$NETEM_THREADS" \
                 python3 scripts/run_bench.py ); then
@@ -247,7 +256,7 @@ main() {
     log "Grid size: $(echo $NETEM_RTTS_MS | wc -w) x $(echo $NETEM_LOSS_PCT | wc -w) = $(( $(echo $NETEM_RTTS_MS | wc -w) * $(echo $NETEM_LOSS_PCT | wc -w) )) points"
     log "Scenarios: $NETEM_SCENARIOS"
     log "Projects: $NETEM_PROJECTS"
-    log "Campaign: compilers [$NETEM_COMPILERS], clients [$NETEM_CASES], server threads [$NETEM_THREADS], $NETEM_REPETITIONS measured repetitions (+1 warm-up), payload $NETEM_PAYLOAD"
+    log "Campaign: compilers [$NETEM_COMPILERS], clients [$NETEM_CASES], server threads [$NETEM_THREADS], $NETEM_REPETITIONS measured repetitions (+1 warm-up), payload $NETEM_PAYLOAD, client timeout ${NETEM_CLIENT_TIMEOUT}s"
 
     if [ -z "$DRY_RUN" ]; then
         netem_require
