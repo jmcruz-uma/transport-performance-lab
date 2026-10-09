@@ -3,14 +3,17 @@
 #   tls/ca.crt tls/ca.key   -- throwaway test CA
 #   tls/server.crt tls/server.key -- server leaf, EC P-256, SAN DNS:localhost
 # Every arm's server loads server.{crt,key}; every arm's client pins ca.crt.
-# Idempotent: regenerates only when a file is missing.
+# Idempotent: regenerates only when a file is missing or the certificates expire within
+# 7 days (they are issued for 30, and run.sh refuses to start a campaign with less than 7).
 set -eu
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-if [ -f ca.crt ] && [ -f server.crt ] && [ -f server.key ]; then
-    echo "tls/gen_certs.sh: certificates already present"
+if [ -f ca.crt ] && [ -f server.crt ] && [ -f server.key ] &&
+   openssl x509 -in server.crt -noout -checkend $((7 * 24 * 3600)) >/dev/null &&
+   openssl x509 -in ca.crt -noout -checkend $((7 * 24 * 3600)) >/dev/null; then
+    echo "tls/gen_certs.sh: certificates already present and valid for at least 7 more days"
     exit 0
 fi
 

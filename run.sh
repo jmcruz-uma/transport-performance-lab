@@ -137,6 +137,17 @@ save_system_info() {
     echo "==== /proc/cmdline ===="
     cat /proc/cmdline || true
     echo
+    echo "==== versions (what was built, for the paper) ===="
+    echo "harness: $(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null)$(git -C "$ROOT_DIR" diff --quiet HEAD 2>/dev/null || echo ' (uncommitted changes)')"
+    local src
+    for src in "$ROOT_DIR"/*/build-*/_deps/*-src; do
+      [ -e "$src/.git" ] || continue  # only dependencies fetched as their own git checkout
+      echo "${src#"$ROOT_DIR"/}: $(git -C "$src" rev-parse HEAD 2>/dev/null)"
+    done
+    g++-14 --version 2>/dev/null | head -1 || true
+    clang++-20 --version 2>/dev/null | head -1 || true
+    dpkg-query -W -f='${Package} ${Version}\n' libssl3 libssl3t64 libssl-dev libc++1-20 libc++-20-dev libbenchmark-dev 2>/dev/null | grep -v ' $' || true
+    echo
     echo "==== env ===="
     env | sort
   } > "$SYSTEM_INFO_TXT"
@@ -581,7 +592,19 @@ merge_reports() {
   fi
 }
 
+# build.sh issues the TLS certificates with 30 days of validity. A campaign must not
+# outlive them: the tls / tls_framed handshakes would start failing mid-campaign.
+check_tls_certificate() {
+  local crt="$ROOT_DIR/tls/server.crt"
+  if [ ! -f "$crt" ] || ! openssl x509 -in "$crt" -noout -checkend $((7 * 24 * 3600)) >/dev/null; then
+    log "ERROR: $crt is missing or expires within 7 days; run build.sh to issue new certificates."
+    exit 1
+  fi
+  log "TLS certificate valid until $(openssl x509 -in "$crt" -noout -enddate | cut -d= -f2)"
+}
+
 main() {
+  check_tls_certificate
   prepare_dirs
   save_manifest
   save_system_info
