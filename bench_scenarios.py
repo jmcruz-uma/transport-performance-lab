@@ -40,6 +40,14 @@ nothing to toggle by hand.
                     (65507 bytes -- true limit, "64 KiB" literally overflows
                     it), 5-way.
   udp_k1400     E4  same, ~MTU-sized datagrams.
+  <scenario>_crc    for streaming, whole_transfer, framed, tls, tls_framed, udp_k1400,
+                    streaming_naive and whole_transfer_naive: the same server and
+                    clients built with CONSUME_CRC (tls/consume_crc.hpp), which run a
+                    CRC-32C over every byte of each complete unit received (the
+                    clients without the suffix discard the data). The TCP clients
+                    check the final CRC against EXPECTED_CRC32C, computed here by
+                    tls/crc32c_expected (built by build.sh) over the bytes the server
+                    sends; UDP may lose datagrams, so it only processes them.
 
 Same wire for streaming / whole_transfer and their naive variants
 (raw-until-close), so they share `tcpserver`. "framed" has its own wire (length-prefixed messages, no security)
@@ -51,6 +59,8 @@ each scenario independently.
 
 Env:
   RUN_SCENARIOS="framed udp"   run only these (space/comma separated); default all
+                               but the *_crc ones, which run only when named;
+                               "crc" names all of them
   DRY_RUN=1                    plumbing-only local validation, no real execution
   PAYLOAD=10MB                 payload of every scenario: 100MB (default) or 10MB
   TCP_CASES, TCP_THREADS,      client counts and server thread counts of the TCP
@@ -60,6 +70,7 @@ Env:
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 # name -> {server, bench, cases, threads, env}
@@ -114,19 +125,59 @@ SCENARIOS = {
     "udp_k1400":    dict(server="udpserver", bench="bench_udp", env={"DGRAM_BYTES": "1400"},  **_UDP_GRID),
 }
 
+# "_crc" variants: same server, grid and env, clients built with CONSUME_CRC.
+_CRC_BASES = ["streaming", "whole_transfer", "framed", "tls", "tls_framed", "udp_k1400",
+              "streaming_naive", "whole_transfer_naive"]
+for _base in _CRC_BASES:
+    SCENARIOS[f"{_base}_crc"] = dict(SCENARIOS[_base], bench=SCENARIOS[_base]["bench"] + "_crc",
+                                     env=dict(SCENARIOS[_base].get("env", {})))
+_CRC_NAMES = [f"{b}_crc" for b in _CRC_BASES]
+
 DRY_RUN = os.environ.get("DRY_RUN", "").strip().lower() not in ("", "0", "false", "no")
 
 
-def active_scenarios():
+def _requested_names():
     raw = os.environ.get("RUN_SCENARIOS", "").strip()
-    if not raw:
-        return list(SCENARIOS.keys())
-    names = [n for chunk in raw.replace(",", " ").split() for n in [chunk] if n]
+    names = [n for n in raw.replace(",", " ").split() if n]
+    return [x for n in names for x in (_CRC_NAMES if n == "crc" else [n])]
+
+
+def active_scenarios():
+    names = _requested_names()
+    if not names:
+        return [n for n in SCENARIOS if n not in _CRC_NAMES]
     unknown = [n for n in names if n not in SCENARIOS]
     if unknown:
         raise SystemExit(f"Unknown scenario(s) in RUN_SCENARIOS: {unknown}. "
                           f"Valid: {list(SCENARIOS.keys())}")
     return names
+
+
+def _payload_bytes():
+    try:
+        return os.path.getsize(PAYLOAD_FILE)
+    except OSError:
+        return None
+
+
+def _expected_crc(*manifest):
+    tool = "../tls/crc32c_expected"
+    if not os.path.exists(tool):
+        raise SystemExit(f"{tool} not found: build.sh builds it (needed by the *_crc scenarios)")
+    out = subprocess.run([tool, PAYLOAD_FILE, *manifest], check=True, capture_output=True, text=True)
+    return out.stdout.strip()
+
+
+_size = _payload_bytes()
+if _size is not None:
+    for _spec in SCENARIOS.values():
+        _spec.setdefault("env", {})["PAYLOAD_BYTES"] = str(_size)
+if not DRY_RUN and _size is not None and any(n in _CRC_NAMES for n in _requested_names()):
+    # The framed servers send one body per manifest size, cut from the payload in order.
+    _crc_whole, _crc_framed = _expected_crc(), _expected_crc(_MANIFEST)
+    for _name in _CRC_NAMES:
+        if not _name.startswith("udp"):
+            SCENARIOS[_name]["env"]["EXPECTED_CRC32C"] = _crc_framed if "framed" in _name else _crc_whole
 
 
 def checkpoint_path(results_dir: str) -> Path:
