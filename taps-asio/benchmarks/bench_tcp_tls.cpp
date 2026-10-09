@@ -38,7 +38,12 @@
 #include "tls_common.hpp"
 
 constexpr int DEFAULT_PORT = 8080;
-constexpr std::uint64_t EXPECTED_FILE_SIZE_BYTES = 100ull * 1024ull * 1024ull;
+// Size of the payload the server sends: PAYLOAD_BYTES, set by the runner for the
+// payload of the campaign; 100 MiB when it is not set.
+static const std::uint64_t EXPECTED_FILE_SIZE_BYTES = [] {
+    const char* v = std::getenv("PAYLOAD_BYTES");
+    return v != nullptr ? std::strtoull(v, nullptr, 10) : 100ull * 1024ull * 1024ull;
+}();
 
 static int g_port = DEFAULT_PORT;
 static std::string g_server_ip = "127.0.0.1";
