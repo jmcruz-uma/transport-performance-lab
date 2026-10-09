@@ -870,6 +870,7 @@ def run_campaign_for_compiler_and_threads(compiler, server_threads):
 
     wait_for_server(server, HOST, actual_port, compiler, server_threads)
 
+    server_exit_reported = False
     try:
         log(f"Running benchmark campaign for {compiler} with {server_threads} server threads...")
 
@@ -890,6 +891,18 @@ def run_campaign_for_compiler_and_threads(compiler, server_threads):
                     file_size_bytes,
                     actual_port,
                 )
+                # The server must outlive the whole grid of this (compiler, threads).
+                # One that exits leaves every later repetition without a server, so
+                # say so once, loudly, and record its exit status on each row.
+                exit_code = server.poll()
+                result["server_alive"] = exit_code is None
+                if exit_code is not None:
+                    result["server_exit_code"] = exit_code
+                    if not server_exit_reported:
+                        log(f"[{compiler}][server_threads={server_threads}] SERVER EXITED with "
+                            f"status {exit_code} after {benches} client(s), repetition {rep}: "
+                            f"the remaining repetitions of this server will fail.")
+                        server_exit_reported = True
                 results.append(result)
                 settle_between_repetitions()
     finally:
