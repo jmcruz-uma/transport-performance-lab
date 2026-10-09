@@ -187,6 +187,8 @@ setup_tls_assets() {
   "$ROOT_DIR/tls/gen_payload.sh" 10485760 10MB.bin
   python3 "$ROOT_DIR/tls/gen_manifest.py" --n 1000 --target-mib 10 \
       --out "$ROOT_DIR/tls/manifest_10MB.txt"
+  # CRC-32C the *_crc clients must obtain (bench_scenarios.py runs it per scenario).
+  g++-14 -O2 -std=c++23 -o "$ROOT_DIR/tls/crc32c_expected" "$ROOT_DIR/tls/crc32c_expected.cpp"
 }
 
 build_project() {

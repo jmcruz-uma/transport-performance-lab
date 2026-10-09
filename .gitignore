@@ -36,6 +36,7 @@ tls/*.key
 tls/*.srl
 tls/manifest.txt
 tls/manifest_10MB.txt
+tls/crc32c_expected
 files/*.sha256
 
 __pycache__/
