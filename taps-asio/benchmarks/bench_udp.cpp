@@ -13,6 +13,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <asio.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -64,6 +66,7 @@ static asio::awaitable<void> receive_datagrams(taps::Connection& connection,
         total_bytes += static_cast<std::uint64_t>(n);
 
         const auto data = message.as_bytes();
+        consume::bytes(data.data(), data.size());
         benchmark::DoNotOptimize(data.data());
         benchmark::DoNotOptimize(total_bytes);
         benchmark::ClobberMemory();
@@ -130,6 +133,11 @@ static void BM_UDP_FileDownload(benchmark::State& state) {
 
         if (!run_benchmark_download(ip, port, downloaded_bytes)) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

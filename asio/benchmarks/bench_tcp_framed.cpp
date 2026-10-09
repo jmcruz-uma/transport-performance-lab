@@ -19,6 +19,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <asio.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -102,6 +104,7 @@ static asio::awaitable<DownloadResult> receive_data(tcp::socket& socket) {
         while (auto body = fr.next_frame()) {
             ++result.messages;
             result.bytes += body->size();
+            consume::bytes(body->data(), body->size());
             benchmark::DoNotOptimize(body->data());
             benchmark::DoNotOptimize(result.bytes);
             benchmark::ClobberMemory();
@@ -160,6 +163,11 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
             state.SkipWithError("Received aggregate does not match the manifest.");
             break;
         }
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
+            break;
+        }
+
         bytes_processed += r.bytes;
         last_messages = r.messages;
     }

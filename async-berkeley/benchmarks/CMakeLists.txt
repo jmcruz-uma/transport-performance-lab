@@ -83,3 +83,9 @@ target_compile_features(bench_udp
     PRIVATE
         cxx_std_23
 )
+
+# --- "*_crc" variants (scenarios "<scenario>_crc"): the same clients, processing every
+# received byte with the CRC-32C of ../../tls/consume_crc.hpp. Missing clients are skipped.
+include(${TLS_COMMON_DIR}/consume_crc.cmake)
+consume_crc_variants(bench_tcp bench_tcp_whole_transfer bench_tcp_naive bench_tcp_whole_transfer_naive
+                     bench_tcp_framed bench_tcp_tls bench_tcp_tls_framed bench_udp)

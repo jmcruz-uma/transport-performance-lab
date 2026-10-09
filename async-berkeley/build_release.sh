@@ -52,7 +52,8 @@ build_one() {
         -DCMAKE_CXX_FLAGS="$cxx_flags"
 
     cmake --build "$build_dir" --config Release -j"$(nproc)" \
-        --target tcpserver tcpserver_framed tcpclient udpserver bench_tcp bench_tcp_whole_transfer bench_tcp_framed bench_udp
+        --target tcpserver tcpserver_framed tcpclient udpserver bench_tcp bench_tcp_whole_transfer bench_tcp_framed bench_udp \
+                 bench_tcp_crc bench_tcp_whole_transfer_crc bench_tcp_framed_crc bench_udp_crc
 
     echo ""
     echo "ASYNC-BERKELEY build completed in Release mode with $compiler_label."

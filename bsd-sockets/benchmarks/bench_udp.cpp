@@ -12,6 +12,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -83,6 +85,7 @@ static bool receive_datagrams(int sock, std::uint64_t& total_bytes) {
 
         if (n > 0) {
             total_bytes += static_cast<std::uint64_t>(n);
+            consume::bytes(buffer.data(), static_cast<std::size_t>(n));
             benchmark::DoNotOptimize(buffer.data());
             benchmark::DoNotOptimize(total_bytes);
             benchmark::ClobberMemory();
@@ -140,6 +143,11 @@ static void BM_UDP_FileDownload(benchmark::State& state) {
 
         if (!run_benchmark_client(server_ip, port, downloaded_bytes)) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

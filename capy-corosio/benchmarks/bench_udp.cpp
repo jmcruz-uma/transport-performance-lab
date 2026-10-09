@@ -17,6 +17,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <boost/corosio/delay.hpp>
 #include <boost/corosio/endpoint.hpp>
 #include <boost/corosio/io_context.hpp>
@@ -68,6 +70,7 @@ static capy::task<bool> receive_datagrams(
         }
 
         total_bytes += static_cast<std::uint64_t>(n);
+        consume::bytes(buffer.data(), static_cast<std::size_t>(n));
 
         benchmark::DoNotOptimize(buffer.data());
         benchmark::DoNotOptimize(total_bytes);
@@ -126,6 +129,11 @@ static void BM_UDP_FileDownload(benchmark::State& state) {
 
         if (!run_benchmark_client(ip, port, downloaded_bytes)) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

@@ -13,6 +13,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <openssl/crypto.h>
 
 #include <array>
@@ -101,6 +103,7 @@ static capy::task<bool> run_benchmark_client(corosio::io_context& context, const
 
         if (n > 0) {
             total_bytes += static_cast<std::uint64_t>(n);
+            consume::bytes(buffer.data(), static_cast<std::size_t>(n));
             benchmark::DoNotOptimize(buffer.data());
             benchmark::DoNotOptimize(total_bytes);
             benchmark::ClobberMemory();
@@ -141,6 +144,11 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
             state.SkipWithError("Download failed.");
             break;
         }
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
+            break;
+        }
+
         bytes_processed += downloaded_bytes;
         last_downloaded_bytes = downloaded_bytes;
     }

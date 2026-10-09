@@ -75,7 +75,9 @@ build_one() {
     cmake --build "$build_dir" --config Release -j"$(nproc)" \
         --target tcpserver tcpserver_framed tcpserver_tls tcpserver_tls_framed udpserver tcpclient \
                   bench_tcp bench_tcp_whole_transfer bench_tcp_naive bench_tcp_whole_transfer_naive bench_tcp_framed bench_udp \
-                  bench_tcp_tls bench_tcp_tls_framed
+                  bench_tcp_tls bench_tcp_tls_framed \
+                  bench_tcp_crc bench_tcp_whole_transfer_crc bench_tcp_naive_crc bench_tcp_whole_transfer_naive_crc \
+                  bench_tcp_framed_crc bench_udp_crc bench_tcp_tls_crc bench_tcp_tls_framed_crc
 
     echo ""
     echo "TAPS TCP Release build completed with $compiler_label."

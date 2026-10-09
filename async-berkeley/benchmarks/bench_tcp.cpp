@@ -7,6 +7,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <io/io.hpp>
 
 #include <arpa/inet.h>
@@ -78,6 +80,7 @@ static void receive_data(
             }
 
             state->total_bytes += static_cast<std::uint64_t>(bytes_received);
+            consume::bytes(state->buffer.data(), static_cast<std::size_t>(bytes_received));
 
             benchmark::DoNotOptimize(state->buffer.data());
             benchmark::DoNotOptimize(state->total_bytes);
@@ -144,6 +147,11 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
 
         if (!run_benchmark_client(ip, port, downloaded_bytes)) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

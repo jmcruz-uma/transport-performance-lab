@@ -11,6 +11,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -104,6 +106,7 @@ static capy::task<bool> run_benchmark_client(
     }
 
     total_bytes = object.size();
+    consume::bytes(object.data(), object.size());
 
     // Touch the assembled object so the accumulation cannot be optimised away.
     benchmark::DoNotOptimize(object.data());
@@ -138,6 +141,11 @@ static void BM_TCP_WholeTransfer(benchmark::State& state) {
 
         if (!ok) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

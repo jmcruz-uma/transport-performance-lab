@@ -13,6 +13,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <asio.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
@@ -89,6 +91,7 @@ static asio::awaitable<std::uint64_t> receive_whole_transfer(
         }
 
         total_bytes += static_cast<std::uint64_t>(data.size());
+        consume::bytes(data.data(), data.size());
 
         benchmark::DoNotOptimize(data.data());
         benchmark::DoNotOptimize(total_bytes);
@@ -137,6 +140,11 @@ static void BM_TCP_WholeTransfer(benchmark::State& state) {
 
         if (downloaded_bytes != EXPECTED_FILE_SIZE_BYTES) {
             state.SkipWithError("Downloaded byte count does not match expected file size.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

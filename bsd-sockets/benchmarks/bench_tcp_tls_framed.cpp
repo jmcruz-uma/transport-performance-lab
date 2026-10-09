@@ -16,6 +16,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -115,6 +117,7 @@ static DownloadResult receive_data(SSL* ssl) {
         while (auto body = fr.next_frame()) {
             ++result.messages;
             result.bytes += body->size();
+            consume::bytes(body->data(), body->size());
             benchmark::DoNotOptimize(body->data());
             benchmark::DoNotOptimize(result.bytes);
             benchmark::ClobberMemory();
@@ -168,6 +171,11 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
             state.SkipWithError("Received aggregate does not match the manifest.");
             break;
         }
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
+            break;
+        }
+
         bytes_processed += r.bytes;
         last_messages = r.messages;
     }

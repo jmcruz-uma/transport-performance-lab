@@ -17,6 +17,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <io/io.hpp>
 
 #include <arpa/inet.h>
@@ -141,6 +143,7 @@ static bool run_benchmark_client(
     }
 
     total_bytes = state->object.size();
+    consume::bytes(state->object.data(), state->object.size());
 
     return !state->failed && total_bytes > 0;
 }
@@ -159,6 +162,11 @@ static void BM_TCP_WholeTransfer(benchmark::State& state) {
 
         if (!run_benchmark_client(ip, port, downloaded_bytes)) {
             state.SkipWithError("Download failed.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 

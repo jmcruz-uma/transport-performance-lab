@@ -18,6 +18,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "consume_crc.hpp"
+
 #include <io/io.hpp>
 
 #include <arpa/inet.h>
@@ -116,6 +118,7 @@ static void receive_data(
     while (auto body = state->fr.next_frame()) {
         ++state->messages;
         state->bytes += static_cast<std::uint64_t>(body->size());
+        consume::bytes(body->data(), body->size());
 
         benchmark::DoNotOptimize(body->data());
         benchmark::DoNotOptimize(state->bytes);
@@ -204,6 +207,11 @@ static void BM_TCP_FileDownload(benchmark::State& state) {
         }
         if (messages != g_expected.count || bytes != g_expected.total_bytes) {
             state.SkipWithError("Received aggregate does not match the manifest.");
+            break;
+        }
+
+        if (!consume::verified()) {
+            state.SkipWithError("CRC-32C of the received data does not match.");
             break;
         }
 
